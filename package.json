@@ -1,0 +1,45 @@
+{
+  "name": "open-financial-agents",
+  "version": "0.1.0",
+  "description": "Open-source, model-agnostic financial services agent platform — ported from Anthropic's financial-services reference library. Uses Mastra for AI agent orchestration with support for any LLM provider.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "mastra dev",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "check": "tsc --noEmit",
+    "validate": "tsx scripts/validate.ts",
+    "sync-skills": "tsx scripts/sync-skills.ts",
+    "deploy-agent": "tsx scripts/deploy-agent.ts",
+    "cli": "tsx cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/google": "^1.0.0",
+    "@ai-sdk/mistral": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
+    "@mastra/core": "^1.0.0",
+    "@mastra/mcp": "^1.8.0",
+    "ai": "^4.0.0",
+    "ajv": "^8.17.0",
+    "chalk": "^5.3.0",
+    "commander": "^13.0.0",
+    "dotenv": "^16.4.0",
+    "glob": "^11.0.0",
+    "gray-matter": "^4.0.3",
+    "ora": "^8.0.0",
+    "yaml": "^2.6.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "mastra": "^1.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

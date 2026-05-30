@@ -1,0 +1,82 @@
+{
+  "mcpServers": {
+    // ── Official cookbook servers (required by managed-agent-cookbooks YAML) ──
+    "capiq": {
+      "type": "http",
+      "url": "${CAPIQ_MCP_URL}"
+    },
+    "daloopa": {
+      "type": "http",
+      "url": "https://mcp.daloopa.com/server/mcp"
+    },
+    "factset": {
+      "type": "http",
+      "url": "https://mcp.factset.com/mcp"
+    },
+    "screening": {
+      "type": "http",
+      "url": "${SCREENING_MCP_URL}"
+    },
+    "internal-gl": {
+      "type": "http",
+      "url": "${INTERNAL_GL_MCP_URL}"
+    },
+    "subledger": {
+      "type": "http",
+      "url": "${SUBLEDGER_MCP_URL}"
+    },
+    "nav": {
+      "type": "http",
+      "url": "${NAV_MCP_URL}"
+    },
+    "portfolio": {
+      "type": "http",
+      "url": "${PORTFOLIO_MCP_URL}"
+    },
+    "crm": {
+      "type": "http",
+      "url": "${CRM_MCP_URL}"
+    },
+    // ── General-purpose data providers ──
+    "morningstar": {
+      "type": "http",
+      "url": "https://mcp.morningstar.com/mcp"
+    },
+    "sp-global": {
+      "type": "http",
+      "url": "https://kfinance.kensho.com/integrations/mcp"
+    },
+    "moodys": {
+      "type": "http",
+      "url": "https://api.moodys.com/genai-ready-data/m1/mcp"
+    },
+    "mtnewswire": {
+      "type": "http",
+      "url": "https://vast-mcp.blueskyapi.com/mtnewswires"
+    },
+    "aiera": {
+      "type": "http",
+      "url": "https://mcp-pub.aiera.com"
+    },
+    "lseg": {
+      "type": "http",
+      "url": "https://api.analytics.lseg.com/lfa/mcp/server-cl"
+    },
+    "pitchbook": {
+      "type": "http",
+      "url": "https://premium.mcp.pitchbook.com/mcp"
+    },
+    "chronograph": {
+      "type": "http",
+      "url": "https://ai.chronograph.pe/mcp"
+    },
+    "egnyte": {
+      "type": "http",
+      "url": "https://mcp-server.egnyte.com/mcp"
+    },
+    "box": {
+      "type": "http",
+      "url": "https://mcp.box.com"
+    }
+  }
+}
