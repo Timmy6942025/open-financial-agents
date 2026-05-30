@@ -25,8 +25,7 @@ API="${ANTHROPIC_API_BASE:-https://api.anthropic.com}"
 
 # REPO_SLUG derives from the git remote so this script stays copy-identical
 # across vertical repos; override via env if running outside a checkout.
-REPO_SLUG="${REPO_SLUG:-$(basename -s .git "$(git config --get remote.origin.url)")}"
-: "${REPO_SLUG:?cannot derive REPO_SLUG from git remote; set REPO_SLUG env var}"
+REPO_SLUG="${REPO_SLUG:-$(git config --get remote.origin.url 2>/dev/null | xargs basename -s .git 2>/dev/null || echo 'open-financial-agents')}"
 COOKBOOK_TAG="${REPO_SLUG}/${ROLE}"
 
 req() {
