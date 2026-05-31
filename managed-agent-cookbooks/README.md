@@ -25,9 +25,9 @@ The `agent.yaml` files use the real `POST /v1/agents` field names with a few con
 
 | Manifest convention | Resolves to |
 |---|---|
-| `system: {file: ../../plugins/agent-plugins/<slug>/agents/<slug>.md, append: "..."}` | `system: "<inlined contents + append>"` |
+| `system: {file: ../../src/agents/<slug>.md, append: "..."}` | `system: "<inlined contents + append>"` |
 | `system: {text: "..."}` | `system: "<text>"` |
-| `skills: [{from_plugin: ../../plugins/agent-plugins/<slug>}]` | uploads every `skills/*` under that dir → `[{type: custom, skill_id: ...}, ...]` |
+| `skills: [{from_plugin: ../../src/agent-skills/<slug>}]` | uploads every `skills/*` under that dir → `[{type: custom, skill_id: ...}, ...]` |
 | `skills: [{path: ../../...}]` | `skills: [{type: custom, skill_id: <uploaded-id>}]` |
 | `callable_agents: [{manifest: ./subagents/x.yaml}]` | `callable_agents: [{type: agent, id: <created-id>, version: latest}]` |
 
@@ -35,4 +35,4 @@ The `agent.yaml` files use the real `POST /v1/agents` field names with a few con
 
 ## Cross-agent handoffs
 
-Named agents never call each other directly. When one agent needs another, it emits a `handoff_request` in its output; [`../scripts/orchestrate.py`](../scripts/orchestrate.py) (or your Temporal/Airflow/Guidewire event bus) routes it as a new steering event to the target session. The reference script hard-allowlists targets and schema-validates payloads — see its header comment for the threat model.
+Named agents never call each other directly. When one agent needs another, it emits a `handoff_request` in its output; [`../scripts/orchestrate.ts`](../scripts/orchestrate.ts) (or your Temporal/Airflow/Guidewire event bus) routes it as a new steering event to the target session. The reference script hard-allowlists targets and schema-validates payloads — see its header comment for the threat model.

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ingests GP packages, runs valuation template, stages LP reporting. Same source as the [`valuation-reviewer`](../../plugins/agent-plugins/valuation-reviewer) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Ingests GP packages, runs valuation template, stages LP reporting. Same source as the [`valuation-reviewer`](../../src/agents/valuation-reviewer.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 
@@ -28,6 +28,6 @@ GP-provided valuation packages are untrusted. Three-tier isolation:
 
 `package-reader` returns length-capped, schema-validated JSON. `publisher` produces `./out/lp-pack-<fund>.xlsx`.
 
-**Handoff:** to feed flagged portcos into GL Reconciler, emit a `handoff_request` for `gl-reconciler`; `scripts/orchestrate.py` routes it.
+**Handoff:** to feed flagged portcos into GL Reconciler, emit a `handoff_request` for `gl-reconciler`; `scripts/orchestrate.ts` routes it.
 
 **Not guaranteed:** LP reports require IR and CCO sign-off outside this agent.

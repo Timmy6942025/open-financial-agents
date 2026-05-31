@@ -4,7 +4,7 @@
 
 Finds breaks between general ledger and subledger for a trade date and set of asset classes, traces root cause, and produces an exception report for controller sign-off.
 
-Same source as the [`gl-reconciler`](../../plugins/agent-plugins/gl-reconciler) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Same source as the [`gl-reconciler`](../../src/agents/gl-reconciler.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 
@@ -29,8 +29,8 @@ This agent reads counterparty/custodian statements — documents authored by out
 | **Orchestrator** | No | `Read`, `Grep`, `Glob`, `Agent` | Read-only GL + subledger MCPs |
 | **`resolver`** (Write-holder) | No | `Read`, `Write`, `Edit` | None |
 
-The `reader` returns length-capped, schema-validated JSON only (validated by `scripts/validate.py`). The `critic` independently re-verifies each break against trusted sources before the orchestrator hands the set to `resolver`. The `resolver` writes the exception report to `./out/`; it never opens an outsider file.
+The `reader` returns length-capped, schema-validated JSON only (validated by `scripts/validate.ts`). The `critic` independently re-verifies each break against trusted sources before the orchestrator hands the set to `resolver`. The `resolver` writes the exception report to `./out/`; it never opens an outsider file.
 
-**Handoff:** to feed verified breaks into Month-End Closer, the orchestrator emits a `handoff_request` for `month-end-closer` in its final output; `scripts/orchestrate.py` (or your Temporal/Airflow worker) routes it as a new steering event. See the script for the allowlist + payload-validation pattern.
+**Handoff:** to feed verified breaks into Month-End Closer, the orchestrator emits a `handoff_request` for `month-end-closer` in its final output; `scripts/orchestrate.ts` (or your Temporal/Airflow worker) routes it as a new steering event. See the script for the allowlist + payload-validation pattern.
 
 **Not guaranteed:** none of this writes to a system of record. Ledger adjustments require human approval outside the agent.

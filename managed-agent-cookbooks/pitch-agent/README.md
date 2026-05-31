@@ -2,7 +2,7 @@
 
 ## Overview
 
-Comps, precedents, LBO → branded pitch deck, end to end. Same source as the [`pitch-agent`](../../plugins/agent-plugins/pitch-agent) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Comps, precedents, LBO → branded pitch deck, end to end. Same source as the [`pitch-agent`](../../src/agents/pitch-agent.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 
@@ -28,4 +28,4 @@ Task-decomposition split — less about untrusted inputs (data comes from CapIQ/
 
 Artifacts land in `./out/pitch-<target>.pptx` and `./out/model.xlsx` via `pptx-author` / `xlsx-author`.
 
-**Handoff:** to rebuild the model after a thesis change, the orchestrator emits a `handoff_request` for `model-builder`; `scripts/orchestrate.py` (or your workflow engine) routes it as a new steering event. See the script for the allowlist + payload-validation pattern.
+**Handoff:** to rebuild the model after a thesis change, the orchestrator emits a `handoff_request` for `model-builder`; `scripts/orchestrate.ts` (or your workflow engine) routes it as a new steering event. See the script for the allowlist + payload-validation pattern.

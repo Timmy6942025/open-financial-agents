@@ -2,7 +2,7 @@
 
 ## Overview
 
-Briefing pack before every client meeting. Same source as the [`meeting-prep-agent`](../../plugins/agent-plugins/meeting-prep-agent) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Briefing pack before every client meeting. Same source as the [`meeting-prep-agent`](../../src/agents/meeting-prep-agent.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 

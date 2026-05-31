@@ -2,7 +2,7 @@
 
 ## Overview
 
-Sector or theme → industry overview → competitive landscape → peer comps → ideas shortlist → research note. Same source as the [`market-researcher`](../../plugins/agent-plugins/market-researcher) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Sector or theme → industry overview → competitive landscape → peer comps → ideas shortlist → research note. Same source as the [`market-researcher`](../../src/agents/market-researcher.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 
@@ -28,4 +28,4 @@ Third-party reports and issuer materials are untrusted. Three-tier isolation:
 
 `sector-reader` returns length-capped, schema-validated JSON. `note-writer` produces `./out/primer-<sector>.docx` (and `.pptx` if slides requested).
 
-**Handoff:** to model a single name surfaced in the ideas shortlist, emit a `handoff_request` for `model-builder`; `scripts/orchestrate.py` routes it as a new steering event.
+**Handoff:** to model a single name surfaced in the ideas shortlist, emit a `handoff_request` for `model-builder`; `scripts/orchestrate.ts` routes it as a new steering event.

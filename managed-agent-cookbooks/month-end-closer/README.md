@@ -2,7 +2,7 @@
 
 ## Overview
 
-Accruals, roll-forwards, variance commentary. Same source as the [`month-end-closer`](../../plugins/agent-plugins/month-end-closer) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Accruals, roll-forwards, variance commentary. Same source as the [`month-end-closer`](../../src/agents/month-end-closer.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 

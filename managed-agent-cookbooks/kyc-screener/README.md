@@ -2,7 +2,7 @@
 
 ## Overview
 
-Parses onboarding docs, runs the rules engine, screens sanctions/PEP, flags gaps. Same source as the [`kyc-screener`](../../plugins/agent-plugins/kyc-screener) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Parses onboarding docs, runs the rules engine, screens sanctions/PEP, flags gaps. Same source as the [`kyc-screener`](../../src/agents/kyc-screener.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-DCF, LBO, 3-statement, comps — built as a file artifact. Same source as the [`model-builder`](../../plugins/agent-plugins/model-builder) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+DCF, LBO, 3-statement, comps — built as a file artifact. Same source as the [`model-builder`](../../src/agents/model-builder.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 
@@ -28,4 +28,4 @@ Task-decomposition split — inputs come from trusted MCPs, so the split is abou
 
 `auditor` re-checks ties and balances after `builder` writes `./out/model.xlsx`.
 
-**Handoff:** when invoked from `earnings-reviewer` or `pitch-agent`, the calling agent's `handoff_request` is routed here by `scripts/orchestrate.py`.
+**Handoff:** when invoked from `earnings-reviewer` or `pitch-agent`, the calling agent's `handoff_request` is routed here by `scripts/orchestrate.ts`.

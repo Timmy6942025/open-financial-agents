@@ -2,7 +2,7 @@
 
 ## Overview
 
-Earnings call + filings → model update → note draft. Same source as the [`earnings-reviewer`](../../plugins/agent-plugins/earnings-reviewer) Cowork plugin — this directory is the Managed Agent cookbook for `POST /v1/agents`.
+Earnings call + filings → model update → note draft. Same source as the [`earnings-reviewer`](../../src/agents/earnings-reviewer.md) agent definition — this directory is the Managed Agent cookbook for `POST /v1/agents`.
 
 ## Deploy
 
@@ -28,4 +28,4 @@ Transcripts and press releases are untrusted. Three-tier isolation:
 
 `transcript-reader` returns length-capped, schema-validated JSON. `note-writer` produces `./out/note-<ticker>.docx` and the updated model at `./out/model-<ticker>.xlsx`.
 
-**Handoff:** to rebuild a DCF after an earnings-driven thesis change, emit a `handoff_request` for `model-builder`; `scripts/orchestrate.py` routes it as a new steering event.
+**Handoff:** to rebuild a DCF after an earnings-driven thesis change, emit a `handoff_request` for `model-builder`; `scripts/orchestrate.ts` routes it as a new steering event.
