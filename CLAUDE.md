@@ -1,48 +1,68 @@
-# Financial Services Plugins
+# Open Financial Agents
 
-Cowork plugins and Claude Managed Agent templates for financial services. Each named agent ships two ways from one source.
+Model-agnostic financial services agent platform built on [Mastra](https://mastra.ai). Ported from Anthropic's financial-services reference library with a full TypeScript/Mastra architecture.
 
 ## Repository Structure
 
 ```
-├── plugins/
-│   ├── agent-plugins/               #   named agents — one self-contained plugin each
-│   │   └── <slug>/
-│   │       ├── .claude-plugin/plugin.json
-│   │       ├── agents/<slug>.md     #   ← canonical system prompt (one source, two wrappers)
-│   │       └── skills/              #   ← bundled copies, synced from vertical-plugins/
-│   ├── vertical-plugins/            #   FSI verticals — skill sources, commands, MCPs
-│   │   └── <vertical>/
-│   │       ├── .claude-plugin/plugin.json
-│   │       ├── commands/
-│   │       ├── skills/
-│   │       └── .mcp.json
-│   └── partner-built/               #   partner plugins (LSEG, S&P Global)
-├── managed-agent-cookbooks/         # CMA cookbooks (one dir per named agent)
+├── src/
+│   ├── mastra/index.ts           # Mastra entry point — connects MCP, loads cookbooks, registers agents/workflows
+│   ├── agents/                   # 10 agent .md files (canonical system prompts with YAML frontmatter)
+│   │   └── <slug>.md
+│   ├── workflows/                # 10 Mastra workflows — one per agent (CMA depth-1 pattern)
+│   │   └── <slug>-workflow.ts
+│   ├── tools/                    # CMA tool implementations + subagent dispatch
+│   │   ├── cma-tools.ts          # Read/Write/Edit/Grep/Glob/Bash tool wrappers
+│   │   └── cma-agent-tool.ts     # Dynamic subagent dispatch tool
+│   ├── lib/                      # Shared utilities
+│   │   ├── cma-loader.ts         # Single-pass CMA cookbook loader (agent.md + YAML → Mastra Agent)
+│   │   ├── cma-skill-loader.ts   # SKILL.md resolution from src/agent-skills/ and src/skills/
+│   │   ├── command-loader.ts     # Slash command loader
+│   │   ├── dispatch.ts           # Subagent dispatch helper (scoped/bare name resolution + timeout)
+│   │   ├── model-router.ts       # Model-agnostic LLM provider layer (OpenAI/Anthropic/Google/Mistral)
+│   │   └── skill-loader.ts       # Legacy skill loader
+│   ├── mcp/                      # MCP client + 19-server config
+│   │   ├── mcp-client.ts         # MCP connection, auth, tool listing, reconnect
+│   │   └── mcp.json              # MCP server URLs (19 providers)
+│   ├── commands/                 # 40+ slash commands (.md files by vertical)
+│   ├── skills/                   # 7 vertical skill directories (source of truth)
+│   │   └── <vertical>/<skill>/
+│   ├── agent-skills/             # Bundled skill copies per agent (synced from src/skills/)
+│   │   └── <slug>/skills/<skill>/SKILL.md
+│   └── test/                     # Vitest tests
+├── managed-agent-cookbooks/      # CMA cookbooks (one per agent, agent.yaml + subagents/ + steering)
 │   └── <slug>/
-│       ├── agent.yaml               #   system + skills → ../../plugins/agent-plugins/<slug>/...
-│       ├── subagents/*.yaml         #   depth-1 leaf workers
+│       ├── agent.yaml             # References system prompt + skills from src/ layout
+│       ├── subagents/*.yaml
 │       ├── steering-examples.json
-│       └── README.md                #   security tier + handoff notes
-├── claude-for-msft-365-install/     # admin tooling for the Microsoft 365 add-in (separate from FSI plugins)
-└── scripts/                         # deploy-managed-agent.sh, check.py, validate.py, orchestrate.py, sync-agent-skills.py
+│       └── README.md
+├── partner-plugins/              # LSEG + S&P Global partner plugins
+├── claude-for-msft-365-install/  # Admin tooling for Microsoft 365 add-in
+└── scripts/                      # check, deploy, sync, validate, orchestrate, version-bump
 ```
 
-Run `python3 scripts/check.py` before committing — it lints every manifest, verifies all `system.file` / `skills.path` / `callable_agents.manifest` references resolve, and fails if any `agent-plugins/<slug>/skills/` copy has drifted from its `vertical-plugins/` source. **Edit skills in `vertical-plugins/`**, then run `python3 scripts/sync-agent-skills.py` to propagate into the agent bundles.
+## Development
 
-`check.py` also self-installs a `pre-commit` hook (`git config core.hooksPath .githooks` — no Husky/Node). The hook patch-bumps any plugin's `.claude-plugin/plugin.json` `version` so a branch ends up exactly one patch ahead of `main` (bumped once, not per commit — a plugin's `version` gates update delivery to already-installed users). The `version-bump` GitHub Action enforces the same rule on PRs as a backstop. Bypass a single commit with `git commit --no-verify`; bump logic lives in `scripts/version_bump.py`.
+```bash
+npm install            # installs dependencies
+npx tsc --noEmit       # type-check (must pass before commit)
+npx tsx scripts/check.ts  # lint manifests + verify cross-file refs
+npm test               # run vitest tests
+npm run dev            # start Mastra dev server on :4111
+npm run cli -- list    # list all available agents
+npm run cli -- run <slug> "prompt"  # run an agent via CLI
+```
 
-## Key Files
+## Key Workflows
 
-- `marketplace.json`: Marketplace manifest - registers all plugins with source paths
-- `plugin.json`: Plugin metadata - name, description, version, and component discovery settings
-- `commands/*.md`: Slash commands invoked as `/plugin:command-name`
-- `skills/*/SKILL.md`: Detailed knowledge and workflows for specific tasks
-- `*.local.md`: User-specific configuration (gitignored)
-- `mcp-categories.json`: Canonical MCP category definitions shared across plugins
+1. Edit skills in `src/skills/<vertical>/`, then run `npm run sync-skills` to propagate to agent bundles.
+2. Run `npx tsx scripts/check.ts` before committing — it lints manifests, verifies references resolve, and catches drift.
+3. `scripts/version_bump.py` auto-patch-bumps plugins via pre-commit hook (`.githooks/pre-commit`).
 
-## Development Workflow
+## Architecture
 
-1. Edit markdown files directly - changes take effect immediately
-2. Test commands with `/plugin:command-name` syntax
-3. Skills are invoked automatically when their trigger conditions match
+- **CMA depth-1 pattern**: parent orchestrator → read-only leaf workers → single write-holder
+- **Tool gating**: per-subagent Read/Write/Edit/Grep/Glob/Bash via `agent_toolset_20260401`
+- **MCP routing**: only the data servers declared per subagent
+- **Cross-agent handoff**: `handoff_request` JSON parsed from output, validated against allowlist, routed to target agent
+- **Fan-out**: `coverage-list` syntax triggers batch processing across ticker lists

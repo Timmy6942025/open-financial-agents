@@ -4,7 +4,7 @@ name: market-researcher
 model: claude-opus-4-7
 
 system:
-  file: ../../anthropic-financial-services/plugins/agent-plugins/market-researcher/agents/market-researcher.md
+  file: ../../src/agents/market-researcher.md
   append: "You are running headless. Produce files in ./out/; do not assume an open Office document."
 
 tools:
@@ -22,7 +22,7 @@ mcp_servers:
   - { type: url, name: factset, url: "${FACTSET_MCP_URL}" }
 
 skills:
-  - { from_plugin: ../../anthropic-financial-services/plugins/agent-plugins/market-researcher }
+  - { from_plugin: ../../src/agent-skills/market-researcher }
 
 callable_agents:
   - { manifest: ./subagents/sector-reader.yaml }

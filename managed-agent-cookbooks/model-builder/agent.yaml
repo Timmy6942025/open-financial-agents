@@ -4,7 +4,7 @@ name: model-builder
 model: claude-opus-4-7
 
 system:
-  file: ../../anthropic-financial-services/plugins/agent-plugins/model-builder/agents/model-builder.md
+  file: ../../src/agents/model-builder.md
   append: "You are running headless. Produce files in ./out/; do not assume an open Office document."
 
 tools:
@@ -22,7 +22,7 @@ mcp_servers:
   - { type: url, name: daloopa, url: "${DALOOPA_MCP_URL}" }
 
 skills:
-  - { from_plugin: ../../anthropic-financial-services/plugins/agent-plugins/model-builder }
+  - { from_plugin: ../../src/agent-skills/model-builder }
 
 callable_agents:
   - { manifest: ./subagents/data-puller.yaml }

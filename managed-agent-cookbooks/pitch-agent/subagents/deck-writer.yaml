@@ -21,7 +21,7 @@ tools:
     enabled: true
 mcp_servers: []
 skills:
-- path: ../../../src/agent-skills/pitch-agent/xlsx-author
-- path: ../../../src/agent-skills/pitch-agent/pptx-author
-- path: ../../../src/agent-skills/pitch-agent/pitch-deck
+- path: ../../../src/agent-skills/pitch-agent/skills/xlsx-author
+- path: ../../../src/agent-skills/pitch-agent/skills/pptx-author
+- path: ../../../src/agent-skills/pitch-agent/skills/pitch-deck
 callable_agents: []

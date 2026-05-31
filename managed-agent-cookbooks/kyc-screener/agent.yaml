@@ -4,7 +4,7 @@ name: kyc-screener
 model: claude-opus-4-7
 
 system:
-  file: ../../anthropic-financial-services/plugins/agent-plugins/kyc-screener/agents/kyc-screener.md
+  file: ../../src/agents/kyc-screener.md
   append: "You are running headless. Produce files in ./out/; do not assume an open Office document."
 
 tools:
@@ -20,7 +20,7 @@ mcp_servers:
   - { type: url, name: screening, url: "${SCREENING_MCP_URL}" }
 
 skills:
-  - { from_plugin: ../../anthropic-financial-services/plugins/agent-plugins/kyc-screener }
+  - { from_plugin: ../../src/agent-skills/kyc-screener }
 
 callable_agents:
   - { manifest: ./subagents/doc-reader.yaml }

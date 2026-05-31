@@ -1,17 +1,15 @@
 /**
  * Lint all plugin + managed-agent manifests and verify cross-file references.
- * Ported from check.py with additions for our src/ structure.
  *
  * Checks:
  *   1. Every *.yaml under managed-agent-cookbooks/ parses.
  *   2. Every plugin.json / marketplace.json / steering-examples.json parses.
- *   3. Every plugins/agent-plugins/{slug}/agents/*.md has valid YAML frontmatter
- *      with name + description.
+ *   3. Every agents/*.md has valid YAML frontmatter with name + description.
  *   4. Every system.file, skills[].path, callable_agents[].manifest in agent.yaml
  *      and subagent yamls resolves to an existing file/dir.
  *   5. Every managed-agent-cookbooks/<slug>/ has agent.yaml, README.md,
  *      steering-examples.json.
- *   6. Bundled agent-plugin skills match vertical-plugin sources.
+ *   6. Bundled agent skills match src/skills/ sources.
  *   7. Agent.md prose skill references exist in the agent's own bundle.
  *   8. Marketplace source paths resolve to directories with plugin.json.
  *
@@ -30,13 +28,11 @@ import * as path from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 
-const AGENT_PLUGINS_DIR = join(ROOT, "plugins", "agent-plugins");
-// Note: our vertical skills live in src/skills/, not plugins/vertical-plugins/
-const SRC_SKILLS_DIR = join(ROOT, "src", "skills");
-const MANAGED_DIR = join(ROOT, "managed-agent-cookbooks");
 const SRC_AGENTS_DIR = join(ROOT, "src", "agents");
+const SRC_SKILLS_DIR = join(ROOT, "src", "skills");
 const AGENT_SKILLS_DIR = join(ROOT, "src", "agent-skills");
 const COMMANDS_DIR = join(ROOT, "src", "commands");
+const MANAGED_DIR = join(ROOT, "managed-agent-cookbooks");
 const PARTNER_DIR = join(ROOT, "partner-plugins");
 
 interface Err {
@@ -88,7 +84,8 @@ for (const ymlPath of allYamlFiles.sort()) {
 // --- 2. JSON parse ----------------------------------------------------------
 const jsonGlobs = [
   ".claude-plugin/marketplace.json",
-  "plugins/**/.claude-plugin/plugin.json",
+  "partner-plugins/**/.claude-plugin/plugin.json",
+  "claude-for-msft-365-install/.claude-plugin/plugin.json",
   "managed-agent-cookbooks/*/steering-examples.json",
 ];
 for (const pat of jsonGlobs) {
@@ -103,12 +100,8 @@ for (const pat of jsonGlobs) {
 }
 
 // --- 3. agent.md frontmatter ------------------------------------------------
-const agentMdPatterns = [
-  // eslint-disable-next-line no-template-curly-in-string
-  ...gs("plugins/agent-plugins/*/agents/*.md", { cwd: ROOT }),
-  ...gs("src/agents/*.md", { cwd: ROOT }),
-];
-for (const mdPath of agentMdPatterns.sort()) {
+const agentMdPaths = gs("src/agents/*.md", { cwd: ROOT });
+for (const mdPath of agentMdPaths.sort()) {
   checked++;
   const text = readFileSync(join(ROOT, mdPath), "utf-8");
   if (!text.startsWith("---")) {
@@ -157,8 +150,9 @@ function checkRefs(ymlPath: string): void {
       }
       if (typeof s === "object" && s !== null && "from_plugin" in s) {
         const p = resolve(base, String(s["from_plugin"]));
-        if (!existsSync(join(p, "skills"))) {
-          err(`ref: ${rel(ymlPath)}: skills.from_plugin -> ${s["from_plugin"]} (no skills/ dir)`);
+        // from_plugin can point to a directory with skills/ or flat skill dirs
+        if (!existsSync(join(p, "skills")) && !existsSync(p)) {
+          err(`ref: ${rel(ymlPath)}: skills.from_plugin -> ${s["from_plugin"]} (not found)`);
         }
       }
     }
@@ -183,33 +177,29 @@ for (const ymlPath of allYamlFiles.sort()) {
 
 // --- 4b. bundled skills match src/skills/ source ----------------------------
 const srcByName: Record<string, string> = {};
-// Build source skill map from our src/skills/{vertical}/skill-name/ structure
 if (existsSync(SRC_SKILLS_DIR)) {
   for (const vertDir of readdirSync(SRC_SKILLS_DIR)) {
     const vertPath = join(SRC_SKILLS_DIR, vertDir);
     if (!statSync(vertPath).isDirectory()) continue;
-    const skillsPath = join(vertPath, "skills");
-    if (existsSync(skillsPath)) {
-      // src/skills/{vertical}/skills/skill-name/ (bundled style)
-      for (const skillDir of readdirSync(skillsPath)) {
-        const skillPath = join(skillsPath, skillDir);
-        if (statSync(skillPath).isDirectory()) {
-          srcByName[skillDir] = skillPath;
-        }
-      }
-    } else {
-      // src/skills/{vertical}/skill-name/ (flat style — no skills/ subdir)
-      for (const skillDir of readdirSync(vertPath)) {
-        const skillPath = join(vertPath, skillDir);
-        if (statSync(skillPath).isDirectory()) {
-          srcByName[skillDir] = skillPath;
+
+    for (const entry of readdirSync(vertPath)) {
+      const entryPath = join(vertPath, entry);
+      if (statSync(entryPath).isDirectory()) {
+        // src/skills/{vertical}/{skill-name}/ (directory with SKILL.md)
+        srcByName[entry] = entryPath;
+      } else if (entry.endsWith(".md")) {
+        // src/skills/{vertical}/{skill-name}.md (flat file skill)
+        const name = entry.replace(".md", "");
+        if (!srcByName[name]) {
+          srcByName[name] = entryPath;
         }
       }
     }
   }
 }
 
-const bundledSkillDirs = gs("plugins/agent-plugins/*/skills/*", { cwd: ROOT }).filter((p) => {
+// Find bundled skill dirs under src/agent-skills/
+const bundledSkillDirs = gs("src/agent-skills/*/skills/*", { cwd: ROOT }).filter((p) => {
   try {
     return statSync(join(ROOT, p)).isDirectory();
   } catch {
@@ -222,86 +212,73 @@ for (const bundledPath of bundledSkillDirs.sort()) {
   const skillName = path.basename(bundledPath);
   const src = srcByName[skillName];
   if (!src) {
-    err(`bundled-skill: ${rel(bundledPath)}: no vertical-plugins source named '${skillName}'`);
+    // Agent-specific skill with no src/skills/ counterpart — skip
     continue;
   }
   try {
-    const srcEntries = new Set(readdirSync(src));
-    const bundledEntries = new Set(readdirSync(fullPath));
-    const diffFiles: string[] = [];
-    const leftOnly: string[] = [];
-    const rightOnly: string[] = [];
+    // Compare SKILL.md contents between source and bundled
+    const bundledSkillFile = join(fullPath, "SKILL.md");
+    if (!existsSync(bundledSkillFile)) {
+      continue;
+    }
 
-    for (const f of [...srcEntries]) {
-      if (!bundledEntries.has(f)) leftOnly.push(f);
-    }
-    for (const f of [...bundledEntries]) {
-      if (!srcEntries.has(f)) rightOnly.push(f);
-    }
-    for (const f of [...srcEntries].filter((f) => bundledEntries.has(f))) {
-      const srcFile = join(src, f);
-      const bundFile = join(fullPath, f);
-      if (statSync(srcFile).isFile() && statSync(bundFile).isFile()) {
-        if (readFileSync(srcFile, "utf-8") !== readFileSync(bundFile, "utf-8")) {
-          diffFiles.push(f);
-        }
+    const bundledContent = readFileSync(bundledSkillFile, "utf-8");
+
+    if (statSync(src).isDirectory()) {
+      // Source is a directory — expect SKILL.md inside
+      const srcSkillFile = join(src, "SKILL.md");
+      if (existsSync(srcSkillFile) && readFileSync(srcSkillFile, "utf-8") !== bundledContent) {
+        err(
+          `bundled-skill: ${rel(bundledPath)}: SKILL.md content differs from source ${rel(src)} ` +
+          `(run npm run sync-skills)`
+        );
+      }
+    } else if (src.endsWith(".md")) {
+      // Source is a single .md file — compare directly
+      if (readFileSync(src, "utf-8") !== bundledContent) {
+        err(
+          `bundled-skill: ${rel(bundledPath)}: content differs from source ${rel(src)} ` +
+          `(run npm run sync-skills)`
+        );
       }
     }
-
-    if (diffFiles.length > 0 || leftOnly.length > 0 || rightOnly.length > 0) {
-      err(
-        `bundled-skill: ${rel(bundledPath)}: drifted from ${rel(src)} ` +
-        `(run scripts/sync-agent-skills.py)`
-      );
-    }
   } catch {
-    // Directory read failed — skip drift check
+    // File read failed — skip drift check
   }
 }
 
 // --- 4b2. agent.md prose skill references exist in the agent's own bundle ---
-// Skip this check if plugins/agent-plugins/ doesn't exist in our repo
-// (our structure uses src/agent-skills/ and src/skills/ instead)
-if (existsSync(AGENT_PLUGINS_DIR)) {
-  // eslint-disable-next-line no-template-curly-in-string
-  const agentMdPaths = gs("plugins/agent-plugins/*/agents/*.md", { cwd: ROOT });
-  const skillNamePattern = /`([a-z0-9]+(?:-[a-z0-9]+)+)`/g;
+const skillNamePattern = /`([a-z0-9]+(?:-[a-z0-9]+)+)`/g;
 
-  for (const mdPath of agentMdPaths.sort()) {
-    const slug = path.basename(path.dirname(path.dirname(mdPath)));
-    const skDir = join(AGENT_PLUGINS_DIR, slug, "skills");
-    const bundle = new Set<string>();
-    if (existsSync(skDir)) {
-      for (const d of readdirSync(skDir)) {
-        const fullDir = join(skDir, d);
-        if (statSync(fullDir).isDirectory()) bundle.add(d);
-      }
+for (const mdPath of agentMdPaths.sort()) {
+  const slug = path.basename(mdPath, ".md");
+  const skDir = join(AGENT_SKILLS_DIR, slug, "skills");
+  const bundle = new Set<string>();
+  if (existsSync(skDir)) {
+    for (const d of readdirSync(skDir)) {
+      const fullDir = join(skDir, d);
+      if (statSync(fullDir).isDirectory()) bundle.add(d);
     }
+  }
 
-    const text = readFileSync(join(ROOT, mdPath), "utf-8");
-    const refs = new Set<string>(
-      [...text.matchAll(skillNamePattern)].map((m) => m[1])
-    );
+  const text = readFileSync(join(ROOT, mdPath), "utf-8");
+  const refs = new Set<string>(
+    [...text.matchAll(skillNamePattern)].map((m) => m[1])
+  );
 
-    for (const ref of refs) {
-      if (ref in srcByName && !bundle.has(ref)) {
-        err(
-          `agent-prose: ${rel(mdPath)}: references skill '${ref}' but ` +
-          `plugins/agent-plugins/${slug}/skills/${ref}/ is not bundled`
-        );
-      }
+  for (const ref of refs) {
+    if (ref in srcByName && !bundle.has(ref)) {
+      err(
+        `agent-prose: ${rel(mdPath)}: references skill '${ref}' but ` +
+        `src/agent-skills/${slug}/skills/${ref}/ is not bundled`
+      );
     }
   }
 }
 
 // --- 4c. marketplace source paths resolve -----------------------------------
-// Skip this check — our marketplace.json sources point to the canonical
-// anthropic-financial-services plugin tree (a sibling directory), not our src/
-// This check is meaningful only in the canonical repo itself.
 const _mpPath = join(ROOT, ".claude-plugin", "marketplace.json");
 if (existsSync(_mpPath)) {
-  // Validate JSON parses, but skip source-path resolution since the referenced
-  // paths (plugins/agent-plugins/, plugins/vertical-plugins/) don't exist in our layout.
   checked++;
 }
 
@@ -358,9 +335,9 @@ for (const sf of skillFiles) {
 
 // --- 8. Command frontmatter --------------------------------------------------
 if (existsSync(COMMANDS_DIR)) {
-  for (const file of readdirSync(COMMANDS_DIR)) {
-    if (!file.endsWith(".md")) continue;
-    const filePath = join(COMMANDS_DIR, file);
+  const cmdFiles = gs("src/commands/**/*.md", { cwd: ROOT });
+  for (const file of cmdFiles) {
+    const filePath = join(ROOT, file);
     checked++;
     const text = readFileSync(filePath, "utf-8");
     if (!text.startsWith("---")) continue;
@@ -395,7 +372,6 @@ if (existsSync(AGENT_SKILLS_DIR)) {
 
 // --- 10. Partner plugin skill validation ------------------------------------
 if (existsSync(PARTNER_DIR)) {
-  // glob with absolute pattern — results are absolute, no need to join with ROOT
   const partnerSkills = gs(`${PARTNER_DIR}/**/SKILL.md`);
   for (const ps of partnerSkills) {
     checked++;

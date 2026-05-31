@@ -15,10 +15,11 @@
  *   - deck-writer:  read+write+edit, NO MCP, only leaf with Write
  */
 
-import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
 import { dispatchSubagent } from "../lib/dispatch.js";
+import { defineStep } from "../lib/step-utils.js";
 
 export const pitchWorkflow = createWorkflow({
   id: "pitch-workflow",
@@ -36,7 +37,7 @@ export const pitchWorkflow = createWorkflow({
   }),
 })
   .then(
-    createStep({
+    defineStep({
       id: "research",
       description: "Pull comps and precedent transactions from CapIQ/Daloopa (read+grep+MCP, schema-validated)",
       inputSchema: z.object({
@@ -49,47 +50,42 @@ export const pitchWorkflow = createWorkflow({
         researchFindings: z.string(),
         handoff: z.unknown().optional(),
       }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          // Check for fan-out
-          const coverageList = detectCoverageList(inputData.target);
-          if (coverageList) {
-            const entries = fanOutCoverageList(inputData.target, coverageList);
-            const results = await Promise.all(
-              entries.map(async (e) => {
-                const res = await dispatchSubagent(
-                  mastra,
-                  "pitch-agent/pitch-researcher",
-                  `Research comps for target: ${e.ticker}. ${inputData.acquirer ? `Acquirer: ${inputData.acquirer}. ` : ""}Situation: ${inputData.situation}${inputData.thesis ? `. Thesis: ${inputData.thesis}` : ""}`
-                );
-                return `${e.ticker}: ${res}`;
-              })
-            );
-            return { researchFindings: results.join("\n\n---\n\n") };
-          }
-
-          const result = await dispatchSubagent(
-            mastra,
-            "pitch-agent/pitch-researcher",
-            `Research comps and precedent transactions for target: ${inputData.target}. Pull trading multiples and precedent data from CapIQ/Daloopa. Return a structured table as schema-validated JSON. ${inputData.acquirer ? `Acquirer: ${inputData.acquirer}. ` : ""}Situation: ${inputData.situation}${inputData.thesis ? `. Thesis: ${inputData.thesis}` : ""}`
+      passthroughMapper: (input) => ({ researchFindings: input.target, handoff: input.handoff }),
+      execute: async ({ input, mastra }) => {
+        const coverageList = detectCoverageList(input.target);
+        if (coverageList) {
+          const entries = fanOutCoverageList(input.target, coverageList);
+          const results = await Promise.all(
+            entries.map(async (e) => {
+              const res = await dispatchSubagent(
+                mastra,
+                "pitch-agent/pitch-researcher",
+                `Research comps for target: ${e.ticker}. ${input.acquirer ? `Acquirer: ${input.acquirer}. ` : ""}Situation: ${input.situation}${input.thesis ? `. Thesis: ${input.thesis}` : ""}`
+              );
+              return `${e.ticker}: ${res}`;
+            })
           );
-
-          // Check for handoff (safely — may not be JSON)
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          if (handoff) {
-            return { researchFindings: result, handoff };
-          }
-
-          return { researchFindings: result };
-        } catch (err: any) {
-          throw new Error(`pitch-researcher failed: ${err.message}`);
+          return { researchFindings: results.join("\n\n---\n\n") };
         }
+
+        const result = await dispatchSubagent(
+          mastra,
+          "pitch-agent/pitch-researcher",
+          `Research comps and precedent transactions for target: ${input.target}. Pull trading multiples and precedent data from CapIQ/Daloopa. Return a structured table as schema-validated JSON. ${input.acquirer ? `Acquirer: ${input.acquirer}. ` : ""}Situation: ${input.situation}${input.thesis ? `. Thesis: ${input.thesis}` : ""}`
+        );
+
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        if (handoff) {
+          return { researchFindings: result, handoff };
+        }
+
+        return { researchFindings: result };
       },
     })
   )
   .then(
-    createStep({
+    defineStep({
       id: "model",
       description: "Build DCF/LBO valuation with Python via Bash (read+bash+MCP)",
       inputSchema: z.object({
@@ -100,30 +96,22 @@ export const pitchWorkflow = createWorkflow({
         workbook: z.string(),
         handoff: z.unknown().optional(),
       }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          // If previous step emitted a handoff, bubble it up
-          if (inputData.handoff) {
-            return { workbook: inputData.researchFindings, handoff: inputData.handoff };
-          }
+      passthroughMapper: (input) => ({ workbook: input.researchFindings, handoff: input.handoff }),
+      execute: async ({ input, mastra }) => {
+        const result = await dispatchSubagent(
+          mastra,
+          "pitch-agent/pitch-modeler",
+          `Build DCF/LBO valuation in a scratch directory using the comps and inputs handed to you. Run calculations in Python via Bash. Return computed outputs as structured JSON. You do not write the final workbook — the deck-writer does. ${input.researchFindings}`
+        );
 
-          const result = await dispatchSubagent(
-            mastra,
-            "pitch-agent/pitch-modeler",
-            `Build DCF/LBO valuation in a scratch directory using the comps and inputs handed to you. Run calculations in Python via Bash. Return computed outputs as structured JSON. You do not write the final workbook — the deck-writer does. ${inputData.researchFindings}`
-          );
-
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return { workbook: result, handoff: handoff || undefined };
-        } catch (err: any) {
-          throw new Error(`pitch-modeler failed: ${err.message}`);
-        }
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return { workbook: result, handoff: handoff || undefined };
       },
     })
   )
   .then(
-    createStep({
+    defineStep({
       id: "write-deck",
       description: "Produce pitch deck from model outputs (ONLY leaf with Write+Edit, no MCP)",
       inputSchema: z.object({
@@ -134,24 +122,16 @@ export const pitchWorkflow = createWorkflow({
         deck: z.string(),
         handoff: z.unknown().optional(),
       }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          if (inputData.handoff) {
-            return { deck: inputData.workbook, handoff: inputData.handoff };
-          }
+      execute: async ({ input, mastra }) => {
+        const result = await dispatchSubagent(
+          mastra,
+          "pitch-agent/pitch-deck-writer",
+          `Take the verified comps, model outputs, and football field, and produce ./out/model-pitch.xlsx and ./out/pitch-deck.pptx using xlsx-author and pptx-author conventions. Never open external documents. ${input.workbook}`
+        );
 
-          const result = await dispatchSubagent(
-            mastra,
-            "pitch-agent/pitch-deck-writer",
-            `Take the verified comps, model outputs, and football field, and produce ./out/model-pitch.xlsx and ./out/pitch-deck.pptx using xlsx-author and pptx-author conventions. Never open external documents. ${inputData.workbook}`
-          );
-
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return { deck: result || "./out/pitch-deck.pptx", handoff: handoff || undefined };
-        } catch (err: any) {
-          throw new Error(`pitch-deck-writer failed: ${err.message}`);
-        }
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return { deck: result || "./out/pitch-deck.pptx", handoff: handoff || undefined };
       },
     })
   )

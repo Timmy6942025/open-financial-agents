@@ -7,10 +7,11 @@
  * Supports handoff extraction, fan-out, and dynamic dispatch.
  */
 
-import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
 import { dispatchSubagent } from "../lib/dispatch.js";
+import { defineStep } from "../lib/step-utils.js";
 
 export const marketResearcherWorkflow = createWorkflow({
   id: "market-researcher-workflow",
@@ -25,73 +26,61 @@ export const marketResearcherWorkflow = createWorkflow({
   }),
 })
   .then(
-    createStep({
+    defineStep({
       id: "read-sector",
       description: "Extract market-size, growth, and landscape facts from research (read+grep only, schema-validated)",
       inputSchema: z.object({ sector: z.string(), angle: z.string().optional() }),
       outputSchema: z.object({ overview: z.string(), handoff: z.unknown().optional() }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          const coverageList = detectCoverageList(inputData.sector);
-          if (coverageList) {
-            const entries = fanOutCoverageList(inputData.sector, coverageList);
-            const results = await Promise.all(
-              entries.map(async (e) => {
-                const res = await dispatchSubagent(mastra, "market-researcher/market-sector-reader",
-                  `Read third-party research and issuer materials for sector: ${e.ticker}, extract market-size, growth, and landscape facts. Return schema-validated JSON.`);
-                return `${e.ticker}: ${res}`;
-              })
-            );
-            return { overview: results.join("\n\n---\n\n") };
-          }
-          const result = await dispatchSubagent(mastra, "market-researcher/market-sector-reader",
-            `Read third-party research and issuer materials for sector: ${inputData.sector}, extract market-size, growth, and landscape facts. ${inputData.angle ? `Angle: ${inputData.angle}. ` : ""}Return schema-validated JSON.`);
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return { overview: result, handoff };
-        } catch (err: any) {
-          throw new Error(`market-sector-reader failed: ${err.message}`);
+      passthroughMapper: (input) => ({ overview: input.sector, handoff: input.handoff }),
+      execute: async ({ input, mastra }) => {
+        const coverageList = detectCoverageList(input.sector);
+        if (coverageList) {
+          const entries = fanOutCoverageList(input.sector, coverageList);
+          const results = await Promise.all(
+            entries.map(async (e) => {
+              const res = await dispatchSubagent(mastra, "market-researcher/market-sector-reader",
+                `Read third-party research and issuer materials for sector: ${e.ticker}, extract market-size, growth, and landscape facts. Return schema-validated JSON.`);
+              return `${e.ticker}: ${res}`;
+            })
+          );
+          return { overview: results.join("\n\n---\n\n") };
         }
+        const result = await dispatchSubagent(mastra, "market-researcher/market-sector-reader",
+          `Read third-party research and issuer materials for sector: ${input.sector}, extract market-size, growth, and landscape facts. ${input.angle ? `Angle: ${input.angle}. ` : ""}Return schema-validated JSON.`);
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return { overview: result, handoff };
       },
     })
   )
   .then(
-    createStep({
+    defineStep({
       id: "spread-comps",
       description: "Pull trading multiples for defined peer set (read+grep+MCP)",
       inputSchema: z.object({ overview: z.string(), handoff: z.unknown().optional() }),
       outputSchema: z.object({ compsSpread: z.string(), handoff: z.unknown().optional() }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          if (inputData.handoff) return { compsSpread: inputData.overview, handoff: inputData.handoff };
-          const result = await dispatchSubagent(mastra, "market-researcher/market-comps-spreader",
-            `Pull trading multiples for the peer set from CapIQ/FactSet MCP and spread them with consistent metric definitions. ${inputData.overview}`);
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return { compsSpread: result, handoff };
-        } catch (err: any) {
-          throw new Error(`market-comps-spreader failed: ${err.message}`);
-        }
+      passthroughMapper: (input) => ({ compsSpread: input.overview, handoff: input.handoff }),
+      execute: async ({ input, mastra }) => {
+        const result = await dispatchSubagent(mastra, "market-researcher/market-comps-spreader",
+          `Pull trading multiples for the peer set from CapIQ/FactSet MCP and spread them with consistent metric definitions. ${input.overview}`);
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return { compsSpread: result, handoff };
       },
     })
   )
   .then(
-    createStep({
+    defineStep({
       id: "write-note",
       description: "Produce sector primer (ONLY leaf with Write, no MCP)",
       inputSchema: z.object({ compsSpread: z.string(), handoff: z.unknown().optional() }),
       outputSchema: z.object({ primer: z.string(), handoff: z.unknown().optional() }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          if (inputData.handoff) return { primer: inputData.compsSpread, handoff: inputData.handoff };
-          const result = await dispatchSubagent(mastra, "market-researcher/market-note-writer",
-            `Take the overview, landscape, comps spread, and ideas shortlist and produce ./out/primer-sector.docx. ${inputData.compsSpread}`);
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return { primer: result, handoff };
-        } catch (err: any) {
-          throw new Error(`market-note-writer failed: ${err.message}`);
-        }
+      execute: async ({ input, mastra }) => {
+        const result = await dispatchSubagent(mastra, "market-researcher/market-note-writer",
+          `Take the overview, landscape, comps spread, and ideas shortlist and produce ./out/primer-sector.docx. ${input.compsSpread}`);
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return { primer: result, handoff };
       },
     })
   )

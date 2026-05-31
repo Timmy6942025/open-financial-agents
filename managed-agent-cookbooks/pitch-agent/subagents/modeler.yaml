@@ -35,6 +35,6 @@ mcp_servers:
   name: daloopa
   url: ${DALOOPA_MCP_URL}
 skills:
-- path: ../../../src/agent-skills/pitch-agent/dcf-model
-- path: ../../../src/agent-skills/pitch-agent/lbo-model
+- path: ../../../src/agent-skills/pitch-agent/skills/dcf-model
+- path: ../../../src/agent-skills/pitch-agent/skills/lbo-model
 callable_agents: []

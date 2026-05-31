@@ -15,10 +15,11 @@
  *   - auditor:     read+grep only, NO MCP, re-checks model for ties/balance/hardcodes
  */
 
-import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
 import { dispatchSubagent } from "../lib/dispatch.js";
+import { defineStep } from "../lib/step-utils.js";
 
 export const modelBuilderWorkflow = createWorkflow({
   id: "model-builder-workflow",
@@ -37,7 +38,7 @@ export const modelBuilderWorkflow = createWorkflow({
   }),
 })
   .then(
-    createStep({
+    defineStep({
       id: "pull-data",
       description: "Pull historicals and consensus from CapIQ/Daloopa (read+grep+MCP, schema-validated)",
       inputSchema: z.object({
@@ -51,42 +52,38 @@ export const modelBuilderWorkflow = createWorkflow({
         inputTable: z.string(),
         handoff: z.unknown().optional(),
       }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          // Check for fan-out
-          const coverageList = detectCoverageList(inputData.ticker);
-          if (coverageList) {
-            const entries = fanOutCoverageList(inputData.ticker, coverageList);
-            const results = await Promise.all(
-              entries.map(async (e) => {
-                const res = await dispatchSubagent(
-                  mastra,
-                  "model-builder/model-data-puller",
-                  `Pull historicals and consensus from CapIQ/Daloopa for ${e.ticker}. Return a structured input table as schema-validated JSON. Model: ${inputData.modelType}${inputData.assumptions ? `. Assumptions: ${inputData.assumptions}` : ""}`
-                );
-                return `${e.ticker}: ${res}`;
-              })
-            );
-            return { inputTable: results.join("\n\n---\n\n") };
-          }
-
-          const result = await dispatchSubagent(
-            mastra,
-            "model-builder/model-data-puller",
-            `Pull historicals and consensus from CapIQ/Daloopa for ${inputData.ticker}. Return a structured input table as schema-validated JSON. Model: ${inputData.modelType}${inputData.assumptions ? `. Assumptions: ${inputData.assumptions}` : ""}`
+      passthroughMapper: (input) => ({ inputTable: input.ticker, handoff: input.handoff }),
+      execute: async ({ input, mastra }) => {
+        const coverageList = detectCoverageList(input.ticker);
+        if (coverageList) {
+          const entries = fanOutCoverageList(input.ticker, coverageList);
+          const results = await Promise.all(
+            entries.map(async (e) => {
+              const res = await dispatchSubagent(
+                mastra,
+                "model-builder/model-data-puller",
+                `Pull historicals and consensus from CapIQ/Daloopa for ${e.ticker}. Return a structured input table as schema-validated JSON. Model: ${input.modelType}${input.assumptions ? `. Assumptions: ${input.assumptions}` : ""}`
+              );
+              return `${e.ticker}: ${res}`;
+            })
           );
-
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return handoff ? { inputTable: result, handoff } : { inputTable: result };
-        } catch (err: any) {
-          throw new Error(`model-data-puller failed: ${err.message}`);
+          return { inputTable: results.join("\n\n---\n\n") };
         }
+
+        const result = await dispatchSubagent(
+          mastra,
+          "model-builder/model-data-puller",
+          `Pull historicals and consensus from CapIQ/Daloopa for ${input.ticker}. Return a structured input table as schema-validated JSON. Model: ${input.modelType}${input.assumptions ? `. Assumptions: ${input.assumptions}` : ""}`
+        );
+
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return handoff ? { inputTable: result, handoff } : { inputTable: result };
       },
     })
   )
   .then(
-    createStep({
+    defineStep({
       id: "build-model",
       description: "Build DCF/LBO/3-stmt/comps model (ONLY leaf with Write+Edit+Bash, no MCP)",
       inputSchema: z.object({
@@ -97,29 +94,22 @@ export const modelBuilderWorkflow = createWorkflow({
         modelOutput: z.string(),
         handoff: z.unknown().optional(),
       }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          if (inputData.handoff) {
-            return { modelOutput: inputData.inputTable, handoff: inputData.handoff };
-          }
+      passthroughMapper: (input) => ({ modelOutput: input.inputTable, handoff: input.handoff }),
+      execute: async ({ input, mastra }) => {
+        const result = await dispatchSubagent(
+          mastra,
+          "model-builder/model-builder-builder",
+          `Build the requested model into ./out/model.xlsx using xlsx-author conventions. Inputs are the validated table from data-puller plus user assumptions. ${input.inputTable}`
+        );
 
-          const result = await dispatchSubagent(
-            mastra,
-            "model-builder/model-builder-builder",
-            `Build the requested model into ./out/model.xlsx using xlsx-author conventions. Inputs are the validated table from data-puller plus user assumptions. ${inputData.inputTable}`
-          );
-
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return { modelOutput: result, handoff: handoff || undefined };
-        } catch (err: any) {
-          throw new Error(`model-builder-builder failed: ${err.message}`);
-        }
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return { modelOutput: result, handoff: handoff || undefined };
       },
     })
   )
   .then(
-    createStep({
+    defineStep({
       id: "audit-model",
       description: "Re-check model for ties, balance, hardcodes (read-only, no MCP)",
       inputSchema: z.object({
@@ -131,24 +121,16 @@ export const modelBuilderWorkflow = createWorkflow({
         auditReport: z.string(),
         handoff: z.unknown().optional(),
       }),
-      execute: async ({ inputData, mastra }) => {
-        try {
-          if (inputData.handoff) {
-            return { modelPath: "./out/model.xlsx", auditReport: inputData.modelOutput, handoff: inputData.handoff };
-          }
+      execute: async ({ input, mastra }) => {
+        const result = await dispatchSubagent(
+          mastra,
+          "model-builder/model-auditor",
+          `Re-check ./out/model.xlsx for ties, balance checks, and hardcodes per check-model conventions. Return a pass/fail report with locations of any issues. ${input.modelOutput}`
+        );
 
-          const result = await dispatchSubagent(
-            mastra,
-            "model-builder/model-auditor",
-            `Re-check ./out/model.xlsx for ties, balance checks, and hardcodes per check-model conventions. Return a pass/fail report with locations of any issues. ${inputData.modelOutput}`
-          );
-
-          let handoff: unknown;
-          try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-          return { modelPath: "./out/model.xlsx", auditReport: result || "PASS", handoff: handoff || undefined };
-        } catch (err: any) {
-          throw new Error(`model-auditor failed: ${err.message}`);
-        }
+        let handoff: unknown;
+        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
+        return { modelPath: "./out/model.xlsx", auditReport: result || "PASS", handoff: handoff || undefined };
       },
     })
   )
