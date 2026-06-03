@@ -159,6 +159,7 @@ All connectors are configured in `src/mcp/mcp.json`. Supports 19 financial data 
 | [PitchBook](https://pitchbook.com/) | `https://premium.mcp.pitchbook.com/mcp` |
 | [Chronograph](https://www.chronograph.pe/) | `https://ai.chronograph.pe/mcp` |
 | [Egnyte](https://www.egnyte.com/) | `https://mcp-server.egnyte.com/mcp` |
+| [Box](https://www.box.com/home) | `https://mcp.box.com` |
 
 > MCP access may require a subscription or API key from the provider.
 
