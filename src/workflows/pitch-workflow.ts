@@ -5,21 +5,18 @@
  *   orchestrator → researcher → modeler → deck-writer
  *
  * Supports:
- *   - Handoff extraction: detects handoff_request in step outputs
  *   - Fan-out: coverage-list iteration for batch processing
- *   - Dynamic dispatch: falls back to cma_agent if subagent not registered
+ *   - Direct agent dispatch via Mastra
  *
  * Security model (matches original):
- *   - researcher:   read+grep, CapIQ+Daloopa MCP, output_schema validated
+ *   - researcher:   read+grep, CapIQ+Daloopa MCP
  *   - modeler:      read+bash, CapIQ+Daloopa MCP, runs Python via Bash
  *   - deck-writer:  read+write+edit, NO MCP, only leaf with Write
  */
 
-import { createWorkflow } from "@mastra/core/workflows";
+import { createWorkflow, createStep } from "@mastra/core/workflows";
 import { z } from "zod";
-import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
-import { dispatchSubagentValidated } from "../lib/dispatch.js";
-import { defineStep } from "../lib/step-utils.js";
+import { dispatchAgent, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
 
 export const pitchWorkflow = createWorkflow({
   id: "pitch-workflow",
@@ -33,13 +30,12 @@ export const pitchWorkflow = createWorkflow({
   outputSchema: z.object({
     workbook: z.string().describe("Path to valuation workbook"),
     deck: z.string().describe("Path to pitch deck"),
-    handoff: z.unknown().optional().describe("Handoff request if emitted"),
   }),
 })
   .then(
-    defineStep({
+    createStep({
       id: "research",
-      description: "Pull comps and precedent transactions from CapIQ/Daloopa (read+grep+MCP, schema-validated)",
+      description: "Pull comps and precedent transactions from CapIQ/Daloopa (read+grep+MCP)",
       inputSchema: z.object({
         target: z.string(),
         acquirer: z.string().optional(),
@@ -48,19 +44,17 @@ export const pitchWorkflow = createWorkflow({
       }),
       outputSchema: z.object({
         researchFindings: z.string(),
-        handoff: z.unknown().optional(),
       }),
-      passthroughMapper: (input) => ({ researchFindings: input.target, handoff: input.handoff }),
-      execute: async ({ input, mastra }) => {
-        const coverageList = detectCoverageList(input.target);
+      execute: async ({ inputData, mastra }) => {
+        const coverageList = detectCoverageList(inputData.target);
         if (coverageList) {
-          const entries = fanOutCoverageList(input.target, coverageList);
+          const entries = fanOutCoverageList(inputData.target, coverageList);
           const results = await Promise.all(
             entries.map(async (e) => {
-              const res = await dispatchSubagentValidated(
+              const res = await dispatchAgent(
                 mastra,
                 "pitch-agent/pitch-researcher",
-                `Research comps for target: ${e.ticker}. ${input.acquirer ? `Acquirer: ${input.acquirer}. ` : ""}Situation: ${input.situation}${input.thesis ? `. Thesis: ${input.thesis}` : ""}`
+                `Research comps for target: ${e.ticker}. ${inputData.acquirer ? `Acquirer: ${inputData.acquirer}. ` : ""}Situation: ${inputData.situation}${inputData.thesis ? `. Thesis: ${inputData.thesis}` : ""}`
               );
               return `${e.ticker}: ${res}`;
             })
@@ -68,70 +62,55 @@ export const pitchWorkflow = createWorkflow({
           return { researchFindings: results.join("\n\n---\n\n") };
         }
 
-        const result = await dispatchSubagentValidated(
+        const result = await dispatchAgent(
           mastra,
           "pitch-agent/pitch-researcher",
-          `Research comps and precedent transactions for target: ${input.target}. Pull trading multiples and precedent data from CapIQ/Daloopa. Return a structured table as schema-validated JSON. ${input.acquirer ? `Acquirer: ${input.acquirer}. ` : ""}Situation: ${input.situation}${input.thesis ? `. Thesis: ${input.thesis}` : ""}`
+          `Research comps and precedent transactions for target: ${inputData.target}. Pull trading multiples and precedent data from CapIQ/Daloopa. Return a structured table as schema-validated JSON. ${inputData.acquirer ? `Acquirer: ${inputData.acquirer}. ` : ""}Situation: ${inputData.situation}${inputData.thesis ? `. Thesis: ${inputData.thesis}` : ""}`
         );
-
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        if (handoff) {
-          return { researchFindings: result, handoff };
-        }
 
         return { researchFindings: result };
       },
     })
   )
   .then(
-    defineStep({
+    createStep({
       id: "model",
       description: "Build DCF/LBO valuation with Python via Bash (read+bash+MCP)",
       inputSchema: z.object({
         researchFindings: z.string(),
-        handoff: z.unknown().optional(),
       }),
       outputSchema: z.object({
         workbook: z.string(),
-        handoff: z.unknown().optional(),
       }),
-      passthroughMapper: (input) => ({ workbook: input.researchFindings, handoff: input.handoff }),
-      execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagentValidated(
+      execute: async ({ inputData, mastra }) => {
+        const result = await dispatchAgent(
           mastra,
           "pitch-agent/pitch-modeler",
-          `Build DCF/LBO valuation in a scratch directory using the comps and inputs handed to you. Run calculations in Python via Bash. Return computed outputs as structured JSON. You do not write the final workbook — the deck-writer does. ${input.researchFindings}`
+          `Build DCF/LBO valuation in a scratch directory using the comps and inputs handed to you. Run calculations in Python via Bash. Return computed outputs as structured JSON. You do not write the final workbook — the deck-writer does. ${inputData.researchFindings}`
         );
 
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return { workbook: result, handoff: handoff || undefined };
+        return { workbook: result };
       },
     })
   )
   .then(
-    defineStep({
+    createStep({
       id: "write-deck",
       description: "Produce pitch deck from model outputs (ONLY leaf with Write+Edit, no MCP)",
       inputSchema: z.object({
         workbook: z.string(),
-        handoff: z.unknown().optional(),
       }),
       outputSchema: z.object({
         deck: z.string(),
-        handoff: z.unknown().optional(),
       }),
-      execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagentValidated(
+      execute: async ({ inputData, mastra }) => {
+        const result = await dispatchAgent(
           mastra,
           "pitch-agent/pitch-deck-writer",
-          `Take the verified comps, model outputs, and football field, and produce ./out/model-pitch.xlsx and ./out/pitch-deck.pptx using xlsx-author and pptx-author conventions. Never open external documents. ${input.workbook}`
+          `Take the verified comps, model outputs, and football field, and produce ./out/model-pitch.xlsx and ./out/pitch-deck.pptx using xlsx-author and pptx-author conventions. Never open external documents. ${inputData.workbook}`
         );
 
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return { deck: result || "./out/pitch-deck.pptx", handoff: handoff || undefined };
+        return { deck: result || "./out/pitch-deck.pptx" };
       },
     })
   )

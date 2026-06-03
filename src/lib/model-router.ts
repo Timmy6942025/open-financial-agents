@@ -1,66 +1,55 @@
 /**
- * Model router — validates and resolves model strings.
+ * Model router — resolves model strings for any AI SDK v6 provider.
  *
- * Mastra accepts model strings like 'anthropic/claude-opus-4' directly
- * and handles provider registration internally. This module provides
- * validation and a CMA name → provider/model mapping.
+ * Resolution order (highest priority first):
+ *   1. MODEL_<AGENT_ID> env var — per-agent override
+ *   2. DEFAULT_MODEL env var — global override
+ *   3. CMA alias lookup — legacy Anthropic cookbook names
+ *   4. Passthrough — already in "provider/model" format
  *
- * Usage:
- *   resolveModelString("claude-opus-4-7")   → "anthropic/claude-opus-4"
- *   resolveModelString("openai/gpt-4o")     → "openai/gpt-4o"
+ * When AI Gateway is configured, resolveModelForAgent() returns a
+ * DynamicArgument function that Mastra calls at runtime.
  */
 
 import { createGatewayProvider } from "@ai-sdk/gateway";
+import type { MastraModelConfig } from "@mastra/core/llm";
+import type { DynamicArgument } from "@mastra/core/types";
 
 const MODEL_MAP: Record<string, string> = {
-  "claude-opus-4-7": "anthropic/claude-opus-4",
-  "claude-sonnet-4-7": "anthropic/claude-sonnet-4",
+  "claude-opus-4-7": "anthropic/claude-opus-4-7",
+  "claude-sonnet-4-7": "anthropic/claude-sonnet-4-6",
   "claude-haiku-4-5": "anthropic/claude-haiku-4-5",
 };
 
-/**
- * AI Gateway provider — routes all models through Vercel AI Gateway.
- * Returns null if AI_GATEWAY_API_KEY is not set.
- */
 export const gatewayProvider = process.env.AI_GATEWAY_API_KEY
   ? createGatewayProvider({ apiKey: process.env.AI_GATEWAY_API_KEY })
   : null;
 
-/**
- * Resolve a CMA model name or provider/model string to a Mastra model string.
- *
- * - Known CMA aliases are mapped to provider/model format.
- * - Provider/model strings are passed through unchanged.
- * - The DEFAULT_MODEL env var overrides all if set.
- */
-export function resolveModelString(modelName: string): string {
-  if (process.env.DEFAULT_MODEL) {
-    return process.env.DEFAULT_MODEL;
+export function resolveModelString(modelName: string, agentId?: string): string {
+  if (agentId) {
+    const envKey = `MODEL_${agentId.replace(/-/g, "_").toUpperCase()}`;
+    if (process.env[envKey]) return process.env[envKey];
   }
-  return MODEL_MAP[modelName] || modelName;
+  if (process.env.DEFAULT_MODEL) return process.env.DEFAULT_MODEL;
+  if (MODEL_MAP[modelName]) return MODEL_MAP[modelName];
+  return modelName;
 }
 
-/**
- * Resolve a model for use with processors and guardrails.
- * Returns a LanguageModelV3 instance when AI Gateway is configured,
- * otherwise returns the model string for Mastra's model router.
- */
-export function resolveGuardrailModel(modelName: string): string | ReturnType<NonNullable<typeof gatewayProvider>["languageModel"]> {
+export function resolveModelForAgent(
+  modelName: string,
+  agentId?: string
+): DynamicArgument<MastraModelConfig> {
+  const resolved = resolveModelString(modelName, agentId);
   if (gatewayProvider) {
-    return gatewayProvider.languageModel(resolveModelString(modelName));
+    return () => gatewayProvider.languageModel(resolved);
   }
-  return resolveModelString(modelName);
+  return resolved;
 }
 
-/**
- * Validate that a model string has the expected "provider/model" format.
- * Returns true if valid, throws if not.
- */
 export function validateModelString(modelString: string): boolean {
-  const parts = modelString.split("/");
-  if (parts.length < 2) {
+  if (!modelString.includes("/")) {
     throw new Error(
-      `Invalid model string "${modelString}" — expected "provider/model" format (e.g., "anthropic/claude-opus-4")`
+      `Invalid model string "${modelString}" — expected "provider/model" format`
     );
   }
   return true;

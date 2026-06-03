@@ -65,11 +65,11 @@ npm run cli -- run <slug> "prompt"  # run an agent via CLI
 - **MCP routing**: only the data servers declared per subagent
 - **Guardrail processors**: PromptInjectionDetector, PIIDetector, ModerationProcessor on agents handling untrusted data
 - **Structured output**: Mastra `structuredOutput` enforces JSON schemas at API level (no post-hoc AJV validation)
-- **Model routing**: `resolveModelString()` returns `"provider/model"` strings — Mastra resolves providers internally
+- **Model routing**: Model-agnostic — `MODEL_<AGENT_ID>` per-agent env vars → `DEFAULT_MODEL` global → CMA alias fallback → passthrough. Any AI SDK v6 provider works (OpenAI, Anthropic, Google, Mistral, OpenRouter, AI Gateway).
 - **Memory**: `@mastra/memory` + `@mastra/libsql` for conversation context on key agents (meeting-prep, earnings-reviewer, pitch-agent)
 - **Cross-agent handoff**: `handoff_request` JSON parsed from output, validated against allowlist, routed to target agent
 - **Fan-out**: `coverage-list` syntax triggers batch processing across ticker lists
-- **AI Gateway**: All models route through `ai-gateway.vercel.sh` when `AI_GATEWAY_API_KEY` is set. Uses `@ai-sdk/gateway` provider. Guardrail models also route through gateway.
+- **AI Gateway**: All models route through `ai-gateway.vercel.sh` when `AI_GATEWAY_API_KEY` is set. Uses `@ai-sdk/gateway` provider.
 
 ## Packages
 

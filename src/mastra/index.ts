@@ -10,12 +10,11 @@
  */
 
 import { Mastra } from "@mastra/core/mastra";
-import { Memory } from "@mastra/memory";
 import { LibSQLStore } from "@mastra/libsql";
+import { Memory } from "@mastra/memory";
 import { loadCMACookbooks, type LoadedCMA } from "../lib/cma-loader.js";
 import { connect as connectMCP } from "../mcp/mcp-client.js";
 import { allCMATools } from "../tools/cma-tools.js";
-import { routeHandoff } from "../../scripts/orchestrate.js";
 import { gatewayProvider } from "../lib/model-router.js";
 
 import { pitchWorkflow } from "../workflows/pitch-workflow.js";
@@ -32,8 +31,75 @@ import { statementAuditorWorkflow } from "../workflows/statement-auditor-workflo
 // ── Initialize MCP ─────────────────────────────────────────────────
 await connectMCP();
 
+// ── Storage ────────────────────────────────────────────────────────
+const storage = new LibSQLStore({
+  id: "mastra-storage",
+  url: process.env.MASTRA_DB_URL || ":memory:",
+});
+
+// ── Shared memory instance ────────────────────────────────────────
+// All agents that need conversation context share this Memory instance.
+// Per-agent isolation is handled by Mastra via resourceId/threadId.
+const sharedMemory = new Memory({
+  storage,
+  options: {
+    lastMessages: 20,
+    observationalMemory: true,
+  },
+});
+
+// ── Per-agent memory overrides (working memory, semantic recall) ──
+// Agents that need additional memory features get their own Memory
+// instance with the appropriate options enabled.
+const memoryInstances: Record<string, Memory> = {};
+
+// Meeting-prep: working memory for client preferences and deal context
+memoryInstances["meeting-prep-agent"] = new Memory({
+  storage,
+  options: {
+    lastMessages: 20,
+    observationalMemory: true,
+    workingMemory: {
+      enabled: true,
+      scope: "resource",
+      template: `# Client Profile
+- **Client Name**:
+- **Relationship Manager**:
+- **Meeting Frequency**:
+- **Key Preferences**:
+- **Recent Topics**:
+- **Open Items**:`,
+    },
+  },
+});
+
+// Pitch-agent: working memory for deal context and model assumptions
+memoryInstances["pitch-agent"] = new Memory({
+  storage,
+  options: {
+    lastMessages: 20,
+    observationalMemory: true,
+    workingMemory: {
+      enabled: true,
+      scope: "resource",
+      template: `# Deal Context
+- **Target Company**:
+- **Acquirer** (if applicable):
+- **Sector**:
+- **Deal Type**:
+- **Key Assumptions**:
+- **Valuation Range**:
+- **Status**:
+- **Open Questions**:`,
+    },
+  },
+});
+
+// Earnings-reviewer: lastMessages only (semantic recall requires vector store)
+memoryInstances["earnings-reviewer"] = sharedMemory;
+
 // ── Load CMA cookbooks (single-pass: parents + subagents + skills + commands) ─
-const cma: LoadedCMA = await loadCMACookbooks();
+const cma: LoadedCMA = await loadCMACookbooks(memoryInstances);
 
 // Build the full agents map for Mastra:
 // - CMA parent orchestrators registered by cookbook name
@@ -48,14 +114,7 @@ for (const [key, entry] of Object.entries(cma.subagents)) {
   allAgents[key] = entry.agent;
 }
 
-// Override agent models to use AI Gateway when configured
 if (gatewayProvider) {
-  for (const [name, agent] of Object.entries(allAgents)) {
-    const currentModel = (agent as any).model;
-    if (typeof currentModel === "string") {
-      (agent as any).model = gatewayProvider.languageModel(currentModel);
-    }
-  }
   console.log(`\n✓ AI Gateway active — routing all models through Vercel AI Gateway`);
 }
 
@@ -67,11 +126,6 @@ console.log(
 );
 
 // ── Initialize Mastra ──────────────────────────────────────────────
-const storage = new LibSQLStore({
-  id: "mastra-storage",
-  url: process.env.MASTRA_DB_URL || ":memory:",
-});
-
 export const mastra = new Mastra({
   agents: allAgents,
   tools: allCMATools,
@@ -90,23 +144,5 @@ export const mastra = new Mastra({
   },
 });
 
-// ── Add memory to agents that benefit from conversation context ────
-const memoryConfig = {
-  lastMessages: 20,
-  observationalMemory: true,
-};
-
-const MEMORY_AGENTS = ["meeting-prep-agent", "earnings-reviewer", "pitch-agent"];
-for (const agentName of MEMORY_AGENTS) {
-  const agent = mastra.getAgent(agentName);
-  if (agent) {
-    (agent as any).memory = new Memory({
-      storage,
-      options: memoryConfig,
-    });
-  }
-}
-
-// Export for CLI, scripts, and handoff routing
+// Export for CLI and scripts
 export { cma, allAgents };
-export { routeHandoff };

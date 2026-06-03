@@ -275,14 +275,15 @@ export const bashTool = createTool({
 //
 // Maps CMA tool names to Mastra Tool instances. Used by cma-loader.ts
 // to build per-subagent tool sets based on agent_toolset_20260401 config.
+// Type is permissive to accept both ToolAction and VercelTool (createTool return).
 
-export const CMA_TOOLS: Record<string, ToolAction<any, any, any, any>> = {
-  read: readTool as any,
-  write: writeTool as any,
-  edit: editTool as any,
-  grep: grepTool as any,
-  glob: globTool as any,
-  bash: bashTool as any,
+export const CMA_TOOLS: Record<string, ReturnType<typeof createTool>> = {
+  read: readTool,
+  write: writeTool,
+  edit: editTool,
+  grep: grepTool,
+  glob: globTool,
+  bash: bashTool,
 };
 
 /**

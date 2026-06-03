@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { dispatchSubagent } from "../lib/dispatch.js";
+import { dispatchAgent } from "../../scripts/orchestrate.js";
 
-describe("dispatchSubagent", () => {
+describe("dispatchAgent", () => {
   const mockAgent = {
     generate: vi.fn(),
   };
@@ -17,7 +17,7 @@ describe("dispatchSubagent", () => {
     mockMastra.getAgent.mockReturnValue(mockAgent);
     mockAgent.generate.mockResolvedValue({ text: "test response" });
 
-    const result = await dispatchSubagent(
+    const result = await dispatchAgent(
       mockMastra as any,
       "pitch-agent/pitch-researcher",
       "test prompt"
@@ -31,7 +31,7 @@ describe("dispatchSubagent", () => {
     mockMastra.getAgent.mockReturnValue(mockAgent);
     mockAgent.generate.mockResolvedValue({ text: "response" });
 
-    await dispatchSubagent(
+    await dispatchAgent(
       mockMastra as any,
       "earnings-reviewer/earnings-transcript-reader",
       "analyze this"
@@ -43,7 +43,6 @@ describe("dispatchSubagent", () => {
   });
 
   it("should call getAgent with bare subagent name as fallback", async () => {
-    // Mock has agents registered with scoped keys (matching real cma-loader behavior)
     const mockAgents: Record<string, any> = {
       "pitch-agent": {},
       "pitch-agent/pitch-researcher": mockAgent,
@@ -51,7 +50,7 @@ describe("dispatchSubagent", () => {
     (mockMastra as any).agents = mockAgents;
     mockAgent.generate.mockResolvedValue({ text: "response" });
 
-    await dispatchSubagent(
+    await dispatchAgent(
       mockMastra as any,
       "pitch-researcher",
       "research"
@@ -64,7 +63,7 @@ describe("dispatchSubagent", () => {
     mockMastra.getAgent.mockReturnValue(null);
 
     await expect(
-      dispatchSubagent(mockMastra as any, "pitch-agent/pitch-researcher", "prompt")
+      dispatchAgent(mockMastra as any, "pitch-agent/pitch-researcher", "prompt")
     ).rejects.toThrow("not found");
   });
 
@@ -73,7 +72,7 @@ describe("dispatchSubagent", () => {
     mockAgent.generate.mockRejectedValue(new Error("generation failed"));
 
     await expect(
-      dispatchSubagent(mockMastra as any, "pitch-agent/pitch-researcher", "prompt")
+      dispatchAgent(mockMastra as any, "pitch-agent/pitch-researcher", "prompt")
     ).rejects.toThrow("generation failed");
   });
 });

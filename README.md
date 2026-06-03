@@ -64,10 +64,12 @@ OPENROUTER_API_KEY=sk-or-...       # OpenRouter
 
 # Vercel AI Gateway (routes through gateway.vercel.sh)
 AI_GATEWAY_API_KEY=vck_...         # AI Gateway key
-DEFAULT_MODEL=minimax/minimax-m3   # Model to use via gateway
+DEFAULT_MODEL=minimax/minimax-m3   # Global model override for all agents
 
-# Guardrails (optional, defaults to openrouter/openai/gpt-oss-safeguard-20b)
-GUARDRAIL_MODEL=anthropic/claude-haiku-4-5
+# Per-agent model overrides (optional, highest priority)
+MODEL_PITCH_AGENT=openai/gpt-4o
+MODEL_EARNINGS_REVIEWER=anthropic/claude-sonnet-4-6
+MODEL_MARKET_RESEARCHER=openrouter/anthropic/claude-sonnet-4-6
 
 # Storage (optional, defaults to in-memory)
 MASTRA_DB_URL=file:./mastra.db     # LibSQL for conversation memory
@@ -115,7 +117,7 @@ npm test               # Run vitest tests (55 tests)
 Parent orchestrator → subagent delegation via `agent-<key>` tools → leaf workers.
 
 - **Supervisor agents**: Parent orchestrators use Mastra's `agents` config with subagent Agent instances. Mastra creates `agent-<key>` tools automatically.
-- **Workflow dispatch**: `dispatchSubagentValidated()` resolves scoped/bare agent names with timeout.
+- **Workflow dispatch**: `dispatchAgent()` from `scripts/orchestrate.ts` resolves scoped/bare agent names with timeout.
 - **Tool gating**: Per-subagent Read/Write/Edit/Grep/Glob/Bash via `agent_toolset_20260401`.
 - **MCP routing**: Only the data servers declared per subagent.
 - **Cross-agent handoff**: `handoff_request` JSON parsed from output, validated against allowlist, routed to target agent.
@@ -140,7 +142,14 @@ Mastra's `structuredOutput` enforces JSON schemas at the API level (no post-hoc 
 
 ### Model Routing
 
-`resolveModelString()` returns `"provider/model"` strings — Mastra resolves providers internally. When AI Gateway is configured, all models route through `ai-gateway.vercel.sh` automatically.
+Model-agnostic resolution (highest priority first):
+
+1. **`MODEL_<AGENT_ID>` env var** — per-agent override (e.g., `MODEL_PITCH_AGENT=openai/gpt-4o`)
+2. **`DEFAULT_MODEL` env var** — global override for all agents
+3. **CMA alias lookup** — legacy Anthropic cookbook names (e.g., `claude-opus-4-7` → `anthropic/claude-opus-4-7`)
+4. **Passthrough** — already in `provider/model` format (e.g., `openai/gpt-4o`, `openrouter/anthropic/claude-sonnet-4-6`)
+
+Any AI SDK v6 provider works: OpenAI, Anthropic, Google, Mistral, OpenRouter, or Vercel AI Gateway. When AI Gateway is configured, all models route through `ai-gateway.vercel.sh` automatically.
 
 ## MCP Integrations
 

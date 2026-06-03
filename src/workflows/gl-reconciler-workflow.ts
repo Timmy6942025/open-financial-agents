@@ -4,14 +4,12 @@
  * CMA depth-1 dispatch with dynamic fallback:
  *   orchestrator → reader → critic → resolver
  *
- * Supports handoff extraction, fan-out, and dynamic dispatch.
+ * Supports direct agent dispatch via Mastra.
  */
 
-import { createWorkflow } from "@mastra/core/workflows";
+import { createWorkflow, createStep } from "@mastra/core/workflows";
 import { z } from "zod";
-import { extractHandoff } from "../../scripts/orchestrate.js";
-import { dispatchSubagentValidated } from "../lib/dispatch.js";
-import { defineStep } from "../lib/step-utils.js";
+import { dispatchAgent } from "../../scripts/orchestrate.js";
 
 export const glReconcilerWorkflow = createWorkflow({
   id: "gl-reconciler-workflow",
@@ -22,53 +20,44 @@ export const glReconcilerWorkflow = createWorkflow({
   }),
   outputSchema: z.object({
     report: z.string(),
-    handoff: z.unknown().optional(),
   }),
 })
   .then(
-    defineStep({
+    createStep({
       id: "read-statements",
-      description: "Read counterparty statements and extract candidate breaks (read+grep only, no MCP, schema-validated)",
+      description: "Read counterparty statements and extract candidate breaks (read+grep only, no MCP)",
       inputSchema: z.object({ tradeDate: z.string(), assetClasses: z.string() }),
-      outputSchema: z.object({ breaks: z.string(), handoff: z.unknown().optional() }),
-      passthroughMapper: (input) => ({ breaks: input.tradeDate, handoff: input.handoff }),
-      execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagentValidated(mastra, "gl-reconciler/gl-reconciler-reader",
-          `Read counterparty and custodian statements for asset classes: ${input.assetClasses}, trade date: ${input.tradeDate}. Extract candidate GL/subledger breaks. Return schema-validated JSON.`);
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return { breaks: result, handoff };
+      outputSchema: z.object({ breaks: z.string() }),
+      execute: async ({ inputData, mastra }) => {
+        const result = await dispatchAgent(mastra, "gl-reconciler/gl-reconciler-reader",
+          `Read counterparty and custodian statements for asset classes: ${inputData.assetClasses}, trade date: ${inputData.tradeDate}. Extract candidate GL/subledger breaks. Return schema-validated JSON.`);
+        return { breaks: result };
       },
     })
   )
   .then(
-    defineStep({
+    createStep({
       id: "verify-breaks",
       description: "Re-verify each break against GL and subledger MCPs (read+grep+MCP)",
-      inputSchema: z.object({ breaks: z.string(), handoff: z.unknown().optional() }),
-      outputSchema: z.object({ verified: z.string(), handoff: z.unknown().optional() }),
-      passthroughMapper: (input) => ({ verified: input.breaks, handoff: input.handoff }),
-      execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagentValidated(mastra, "gl-reconciler/gl-reconciler-critic",
-          `Re-verify each reported break against the GL and subledger MCPs. Return confirmed/rejected per break. ${input.breaks}`);
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return { verified: result, handoff };
+      inputSchema: z.object({ breaks: z.string() }),
+      outputSchema: z.object({ verified: z.string() }),
+      execute: async ({ inputData, mastra }) => {
+        const result = await dispatchAgent(mastra, "gl-reconciler/gl-reconciler-critic",
+          `Re-verify each reported break against the GL and subledger MCPs. Return confirmed/rejected per break. ${inputData.breaks}`);
+        return { verified: result };
       },
     })
   )
   .then(
-    defineStep({
+    createStep({
       id: "resolve",
       description: "Draft exception report and write to ./out/ (ONLY leaf with Write, no MCP)",
-      inputSchema: z.object({ verified: z.string(), handoff: z.unknown().optional() }),
-      outputSchema: z.object({ report: z.string(), handoff: z.unknown().optional() }),
-      execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagentValidated(mastra, "gl-reconciler/gl-reconciler-resolver",
-          `Receive the verified break set, draft the exception report, and write it to ./out/. ${input.verified}`);
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return { report: result, handoff };
+      inputSchema: z.object({ verified: z.string() }),
+      outputSchema: z.object({ report: z.string() }),
+      execute: async ({ inputData, mastra }) => {
+        const result = await dispatchAgent(mastra, "gl-reconciler/gl-reconciler-resolver",
+          `Receive the verified break set, draft the exception report, and write it to ./out/. ${inputData.verified}`);
+        return { report: result };
       },
     })
   )

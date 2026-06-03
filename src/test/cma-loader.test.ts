@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { dispatchSubagent } from "../lib/dispatch.js";
+import { dispatchAgent } from "../../scripts/orchestrate.js";
 
 describe("cma-loader: scoped subagent ID resolution", () => {
   const earningsAgent = { generate: vi.fn() };
@@ -22,7 +22,7 @@ describe("cma-loader: scoped subagent ID resolution", () => {
   it("should dispatch earnings-reviewer/note-writer to the earnings agent", async () => {
     earningsAgent.generate.mockResolvedValue({ text: "earnings output" });
 
-    const result = await dispatchSubagent(
+    const result = await dispatchAgent(
       mockMastra,
       "earnings-reviewer/note-writer",
       "write earnings note"
@@ -39,7 +39,7 @@ describe("cma-loader: scoped subagent ID resolution", () => {
   it("should dispatch market-researcher/note-writer to the market agent", async () => {
     marketAgent.generate.mockResolvedValue({ text: "market output" });
 
-    const result = await dispatchSubagent(
+    const result = await dispatchAgent(
       mockMastra,
       "market-researcher/note-writer",
       "write market note"
@@ -58,7 +58,7 @@ describe("cma-loader: scoped subagent ID resolution", () => {
     mockMastra.agents["pitch-agent/pitch-researcher"] = uniqueAgent;
     uniqueAgent.generate.mockResolvedValue({ text: "pitch output" });
 
-    const result = await dispatchSubagent(
+    const result = await dispatchAgent(
       mockMastra,
       "pitch-researcher",
       "research"

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { dispatchSubagent } from "../lib/dispatch.js";
+import { dispatchAgent } from "../../scripts/orchestrate.js";
 
-describe("dispatchSubagent timer cleanup", () => {
+describe("dispatchAgent timer cleanup", () => {
   const mockAgent = {
     generate: vi.fn(),
   };
@@ -18,7 +18,7 @@ describe("dispatchSubagent timer cleanup", () => {
     mockAgent.generate.mockResolvedValue({ text: "ok" });
 
     const start = Date.now();
-    const result = await dispatchSubagent(
+    const result = await dispatchAgent(
       mockMastra as any,
       "pitch-agent/pitch-researcher",
       "prompt"
@@ -34,7 +34,7 @@ describe("dispatchSubagent timer cleanup", () => {
     mockAgent.generate.mockRejectedValue(new Error("generation failed"));
 
     await expect(
-      dispatchSubagent(
+      dispatchAgent(
         mockMastra as any,
         "pitch-agent/pitch-researcher",
         "prompt"
@@ -49,11 +49,11 @@ describe("dispatchSubagent timer cleanup", () => {
     );
 
     await expect(
-      dispatchSubagent(
+      dispatchAgent(
         mockMastra as any,
         "pitch-agent/pitch-researcher",
         "prompt",
-        50
+        { timeoutMs: 50 }
       )
     ).rejects.toThrow(/timed out after 50ms/);
   });
@@ -64,11 +64,11 @@ describe("dispatchSubagent timer cleanup", () => {
       mockMastra.getAgent.mockReturnValue(mockAgent);
       mockAgent.generate.mockResolvedValue({ text: "done" });
 
-      const pending = dispatchSubagent(
+      const pending = dispatchAgent(
         mockMastra as any,
         "pitch-agent/pitch-researcher",
         "prompt",
-        5000
+        { timeoutMs: 5000 }
       );
 
       await vi.advanceTimersByTimeAsync(0);

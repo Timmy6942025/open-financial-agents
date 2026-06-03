@@ -5,7 +5,7 @@ import { resolve, join } from "path";
 
 vi.mock("../lib/model-router.js", () => ({
   resolveModelString: vi.fn((_name: string) => "mock/mock-model"),
-  resolveGuardrailModel: vi.fn((_name: string) => "mock/mock-model"),
+  resolveModelForAgent: vi.fn((_name: string) => "mock/mock-model"),
   gatewayProvider: null,
 }));
 

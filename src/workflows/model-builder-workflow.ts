@@ -4,22 +4,17 @@
  * CMA depth-1 dispatch with dynamic fallback:
  *   orchestrator → data-puller → builder → auditor
  *
- * Supports:
- *   - Handoff extraction: detects handoff_request in step outputs
- *   - Fan-out: coverage-list iteration for batch model builds
- *   - Dynamic dispatch: falls back to cma_agent if subagent not registered
+ * Supports fan-out and direct agent dispatch via Mastra.
  *
  * Security model (matches original):
- *   - data-puller: read+grep, CapIQ+Daloopa MCP, output_schema validated
- *   - builder:     read+write+edit+bash, NO MCP, only leaf with Write+Bash, builds model
- *   - auditor:     read+grep only, NO MCP, re-checks model for ties/balance/hardcodes
+ *   - data-puller: read+grep, CapIQ+Daloopa MCP
+ *   - builder:     read+write+edit+bash, NO MCP, only leaf with Write+Bash
+ *   - auditor:     read+grep only, NO MCP, re-checks model
  */
 
-import { createWorkflow } from "@mastra/core/workflows";
+import { createWorkflow, createStep } from "@mastra/core/workflows";
 import { z } from "zod";
-import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
-import { dispatchSubagentValidated } from "../lib/dispatch.js";
-import { defineStep } from "../lib/step-utils.js";
+import { dispatchAgent, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
 
 export const modelBuilderWorkflow = createWorkflow({
   id: "model-builder-workflow",
@@ -34,13 +29,12 @@ export const modelBuilderWorkflow = createWorkflow({
   outputSchema: z.object({
     modelPath: z.string().describe("Path to model workbook"),
     auditReport: z.string().describe("Audit pass/fail report"),
-    handoff: z.unknown().optional().describe("Handoff request if emitted"),
   }),
 })
   .then(
-    defineStep({
+    createStep({
       id: "pull-data",
-      description: "Pull historicals and consensus from CapIQ/Daloopa (read+grep+MCP, schema-validated)",
+      description: "Pull historicals and consensus from CapIQ/Daloopa (read+grep+MCP)",
       inputSchema: z.object({
         ticker: z.string(),
         modelType: z.string(),
@@ -50,19 +44,17 @@ export const modelBuilderWorkflow = createWorkflow({
       }),
       outputSchema: z.object({
         inputTable: z.string(),
-        handoff: z.unknown().optional(),
       }),
-      passthroughMapper: (input) => ({ inputTable: input.ticker, handoff: input.handoff }),
-      execute: async ({ input, mastra }) => {
-        const coverageList = detectCoverageList(input.ticker);
+      execute: async ({ inputData, mastra }) => {
+        const coverageList = detectCoverageList(inputData.ticker);
         if (coverageList) {
-          const entries = fanOutCoverageList(input.ticker, coverageList);
+          const entries = fanOutCoverageList(inputData.ticker, coverageList);
           const results = await Promise.all(
             entries.map(async (e) => {
-              const res = await dispatchSubagentValidated(
+              const res = await dispatchAgent(
                 mastra,
                 "model-builder/model-data-puller",
-                `Pull historicals and consensus from CapIQ/Daloopa for ${e.ticker}. Return a structured input table as schema-validated JSON. Model: ${input.modelType}${input.assumptions ? `. Assumptions: ${input.assumptions}` : ""}`
+                `Pull historicals and consensus from CapIQ/Daloopa for ${e.ticker}. Return a structured input table as schema-validated JSON. Model: ${inputData.modelType}${inputData.assumptions ? `. Assumptions: ${inputData.assumptions}` : ""}`
               );
               return `${e.ticker}: ${res}`;
             })
@@ -70,67 +62,56 @@ export const modelBuilderWorkflow = createWorkflow({
           return { inputTable: results.join("\n\n---\n\n") };
         }
 
-        const result = await dispatchSubagentValidated(
+        const result = await dispatchAgent(
           mastra,
           "model-builder/model-data-puller",
-          `Pull historicals and consensus from CapIQ/Daloopa for ${input.ticker}. Return a structured input table as schema-validated JSON. Model: ${input.modelType}${input.assumptions ? `. Assumptions: ${input.assumptions}` : ""}`
+          `Pull historicals and consensus from CapIQ/Daloopa for ${inputData.ticker}. Return a structured input table as schema-validated JSON. Model: ${inputData.modelType}${inputData.assumptions ? `. Assumptions: ${inputData.assumptions}` : ""}`
         );
 
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return handoff ? { inputTable: result, handoff } : { inputTable: result };
+        return { inputTable: result };
       },
     })
   )
   .then(
-    defineStep({
+    createStep({
       id: "build-model",
       description: "Build DCF/LBO/3-stmt/comps model (ONLY leaf with Write+Edit+Bash, no MCP)",
       inputSchema: z.object({
         inputTable: z.string(),
-        handoff: z.unknown().optional(),
       }),
       outputSchema: z.object({
         modelOutput: z.string(),
-        handoff: z.unknown().optional(),
       }),
-      passthroughMapper: (input) => ({ modelOutput: input.inputTable, handoff: input.handoff }),
-      execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagentValidated(
+      execute: async ({ inputData, mastra }) => {
+        const result = await dispatchAgent(
           mastra,
           "model-builder/model-builder-builder",
-          `Build the requested model into ./out/model.xlsx using xlsx-author conventions. Inputs are the validated table from data-puller plus user assumptions. ${input.inputTable}`
+          `Build the requested model into ./out/model.xlsx using xlsx-author conventions. Inputs are the validated table from data-puller plus user assumptions. ${inputData.inputTable}`
         );
 
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return { modelOutput: result, handoff: handoff || undefined };
+        return { modelOutput: result };
       },
     })
   )
   .then(
-    defineStep({
+    createStep({
       id: "audit-model",
       description: "Re-check model for ties, balance, hardcodes (read-only, no MCP)",
       inputSchema: z.object({
         modelOutput: z.string(),
-        handoff: z.unknown().optional(),
       }),
       outputSchema: z.object({
         modelPath: z.string(),
         auditReport: z.string(),
-        handoff: z.unknown().optional(),
       }),
-      execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagentValidated(
+      execute: async ({ inputData, mastra }) => {
+        const result = await dispatchAgent(
           mastra,
           "model-builder/model-auditor",
-          `Re-check ./out/model.xlsx for ties, balance checks, and hardcodes per check-model conventions. Return a pass/fail report with locations of any issues. ${input.modelOutput}`
+          `Re-check ./out/model.xlsx for ties, balance checks, and hardcodes per check-model conventions. Return a pass/fail report with locations of any issues. ${inputData.modelOutput}`
         );
 
-        let handoff: unknown;
-        try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
-        return { modelPath: "./out/model.xlsx", auditReport: result || "PASS", handoff: handoff || undefined };
+        return { modelPath: "./out/model.xlsx", auditReport: result || "PASS" };
       },
     })
   )

@@ -11,7 +11,7 @@
  *  - Skill loading (128 SKILL.md files resolved and injected)
  *  - Slash commands (46 command references in parent context)
  *  - Dynamic subagent dispatch (cma_agent tool for runtime delegation)
- *  - Model selection (claude-opus-4-7 → anthropic/claude-opus-4)
+ *  - Model selection (claude-opus-4-7 → anthropic/claude-opus-4-7)
  *
  * Architecture matches the original CMA depth-1 tree:
  *   Parent orchestrator → subagent1 (reader) → subagent2 (processor) → subagent3 (writer)
@@ -21,17 +21,22 @@
  */
 
 import { Agent } from "@mastra/core/agent";
+import { Memory } from "@mastra/memory";
 import {
   PromptInjectionDetector,
   PIIDetector,
   ModerationProcessor,
+  ProcessorStepSchema,
 } from "@mastra/core/processors";
+import { createStep, createWorkflow } from "@mastra/core/workflows";
 import { readFile, readdir } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import yaml from "js-yaml";
-import { resolveModelString, resolveGuardrailModel } from "./model-router.js";
+import { resolveModelForAgent, resolveModelString } from "./model-router.js";
+import type { MastraModelConfig } from "@mastra/core/llm";
+import type { DynamicArgument } from "@mastra/core/types";
 import { listTools as listMCPTools } from "../mcp/mcp-client.js";
 import { CMA_TOOLS } from "../tools/cma-tools.js";
 import {
@@ -42,13 +47,10 @@ import {
   type LoadedSkill,
 } from "./cma-skill-loader.js";
 import { loadCommands } from "./command-loader.js";
-import type { Tool, ToolAction } from "@mastra/core/tools";
+import { createTool } from "@mastra/core/tools";
+import type { Tool } from "@mastra/core/tools";
 
 // ── Guardrail processor factory ──────────────────────────────────────
-
-const GUARDRAIL_MODEL = resolveGuardrailModel(
-  process.env.GUARDRAIL_MODEL || "openrouter/openai/gpt-oss-safeguard-20b"
-);
 
 /**
  * Agents that handle untrusted external documents (KYC, earnings, market research)
@@ -71,32 +73,110 @@ const PII_DETECTED_AGENTS = new Set([
 ]);
 
 /**
+ * Audit log for processor violations. In production, wire to Datadog/Sentry.
+ */
+function logProcessorViolation(violation: { processorId: string; message: string; detail?: unknown }) {
+  console.warn(`[guardrail] ${violation.processorId}: ${violation.message}`, violation.detail ?? "");
+}
+
+/** Set onViolation callback on a processor (typed as any to work around class type limitations) */
+function setOnViolation(processor: any, cb: typeof logProcessorViolation) {
+  processor.onViolation = cb;
+}
+
+/**
+ * Build a parallel processor workflow for agents needing multiple guardrails.
+ * Runs PII detection and prompt injection detection concurrently, then
+ * merges results via .map().
+ *
+ * Returns a workflow that can be passed directly to `inputProcessors`.
+ */
+function buildParallelGuardrailWorkflow(agentName: string) {
+  const needsInjection = INJECTION_DETECTED_AGENTS.has(agentName);
+  const needsPII = PII_DETECTED_AGENTS.has(agentName);
+
+  if (!needsInjection && !needsPII) return null;
+
+  const branches: any[] = [];
+
+  if (needsInjection) {
+    const detector = new PromptInjectionDetector({
+      model: resolveModelString("openai/gpt-5-nano"),
+      threshold: 0.8,
+      strategy: "rewrite",
+      detectionTypes: ["injection", "jailbreak", "system-override"],
+    });
+    setOnViolation(detector, logProcessorViolation);
+    branches.push(createStep(detector));
+  }
+
+  if (needsPII) {
+    const detector = new PIIDetector({
+      model: resolveModelString("openai/gpt-5-nano"),
+      threshold: 0.6,
+      strategy: "redact",
+      redactionMethod: "mask",
+      detectionTypes: ["email", "phone", "credit-card"],
+    });
+    setOnViolation(detector, logProcessorViolation);
+    branches.push(createStep(detector));
+  }
+
+  // Single branch — no workflow needed
+  if (branches.length === 1) return null;
+
+  // Multiple branches — run in parallel via workflow
+  const workflow = createWorkflow({
+    id: `guardrail-${agentName}`,
+    inputSchema: ProcessorStepSchema,
+    outputSchema: ProcessorStepSchema,
+  })
+    .parallel(branches)
+    .map(async ({ inputData }) => {
+      // Select the injection detector output if available, otherwise PII
+      const injectionKey = Object.keys(inputData).find((k) => k.includes("injection"));
+      return inputData[injectionKey ?? Object.keys(inputData)[0]];
+    })
+    .commit();
+
+  return workflow;
+}
+
+/**
  * Build input processors for an agent based on its role.
+ *
+ * For agents needing multiple guardrails (e.g., kyc-screener needs both
+ * PII + injection), returns a parallel workflow that runs them concurrently.
+ * For agents needing a single guardrail, returns a simple array.
  */
 function getAgentInputProcessors(agentName: string): any[] {
+  const parallelWorkflow = buildParallelGuardrailWorkflow(agentName);
+  if (parallelWorkflow) return [parallelWorkflow];
+
+  // Single processor or none
   const processors: any[] = [];
 
   if (INJECTION_DETECTED_AGENTS.has(agentName)) {
-    processors.push(
-      new PromptInjectionDetector({
-        model: GUARDRAIL_MODEL,
-        threshold: 0.8,
-        strategy: "rewrite",
-        detectionTypes: ["injection", "jailbreak", "system-override"],
-      })
-    );
+    const detector = new PromptInjectionDetector({
+      model: resolveModelString("openai/gpt-5-nano"),
+      threshold: 0.8,
+      strategy: "rewrite",
+      detectionTypes: ["injection", "jailbreak", "system-override"],
+    });
+    setOnViolation(detector, logProcessorViolation);
+    processors.push(detector);
   }
 
   if (PII_DETECTED_AGENTS.has(agentName)) {
-    processors.push(
-      new PIIDetector({
-        model: GUARDRAIL_MODEL,
-        threshold: 0.6,
-        strategy: "redact",
-        redactionMethod: "mask",
-        detectionTypes: ["email", "phone", "credit-card"],
-      })
-    );
+    const detector = new PIIDetector({
+      model: resolveModelString("openai/gpt-5-nano"),
+      threshold: 0.6,
+      strategy: "redact",
+      redactionMethod: "mask",
+      detectionTypes: ["email", "phone", "credit-card"],
+    });
+    setOnViolation(detector, logProcessorViolation);
+    processors.push(detector);
   }
 
   return processors;
@@ -107,25 +187,26 @@ function getAgentInputProcessors(agentName: string): any[] {
  * All agents get moderation; PII-sensitive agents also get PII redaction.
  */
 function getAgentOutputProcessors(agentName: string): any[] {
-  const processors: any[] = [
-    new ModerationProcessor({
-      model: GUARDRAIL_MODEL,
-      threshold: 0.7,
-      strategy: "block",
-      categories: ["hate", "harassment", "violence"],
-    }),
-  ];
+  const moderation = new ModerationProcessor({
+    model: resolveModelString("openai/gpt-5-nano"),
+    threshold: 0.7,
+    strategy: "block",
+    categories: ["hate", "harassment", "violence"],
+  });
+  setOnViolation(moderation, logProcessorViolation);
+
+  const processors: any[] = [moderation];
 
   if (PII_DETECTED_AGENTS.has(agentName)) {
-    processors.push(
-      new PIIDetector({
-        model: GUARDRAIL_MODEL,
-        threshold: 0.6,
-        strategy: "redact",
-        redactionMethod: "mask",
-        detectionTypes: ["email", "phone", "credit-card"],
-      })
-    );
+    const pii = new PIIDetector({
+      model: resolveModelString("openai/gpt-5-nano"),
+      threshold: 0.6,
+      strategy: "redact",
+      redactionMethod: "mask",
+      detectionTypes: ["email", "phone", "credit-card"],
+    });
+    setOnViolation(pii, logProcessorViolation);
+    processors.push(pii);
   }
 
   return processors;
@@ -236,6 +317,9 @@ export interface LoadedCMA {
   subagentIds: string[];
 }
 
+/** Memory instances keyed by agent ID. Agents without an entry get no memory. */
+export type AgentMemoryMap = Record<string, Memory>;
+
 let cachedCMA: LoadedCMA | null = null;
 
 /** Get the most recently loaded CMA data (or null if not yet loaded) */
@@ -274,8 +358,8 @@ function getAllowedMCPServers(mcpToolsets: MCPToolset[]): Set<string> {
 
 function getEnabledCMATools(
   configs: ToolConfig[]
-): Record<string, ToolAction<any, any, any, any>> {
-  const tools: Record<string, ToolAction<any, any, any, any>> = {};
+): Record<string, ReturnType<typeof createTool>> {
+  const tools: Record<string, ReturnType<typeof createTool>> = {};
   for (const config of configs) {
     if (!config.enabled) continue;
     const tool = CMA_TOOLS[config.name];
@@ -291,9 +375,9 @@ function getEnabledCMAToolNames(configs: ToolConfig[]): string[] {
 }
 
 function mergeTools(
-  a: Record<string, ToolAction<any, any, any, any>>,
-  b: Record<string, ToolAction<any, any, any, any>>
-): Record<string, ToolAction<any, any, any, any>> {
+  a: Record<string, ReturnType<typeof createTool>>,
+  b: Record<string, ReturnType<typeof createTool>>
+): Record<string, ReturnType<typeof createTool>> {
   return { ...a, ...b };
 }
 
@@ -478,8 +562,8 @@ function extractSkillReferences(text: string): string[] {
 
 // ── Model resolution ────────────────────────────────────────────────
 
-function resolveModel(modelName: string): string {
-  return resolveModelString(modelName);
+function resolveModel(modelName: string, agentId?: string): DynamicArgument<MastraModelConfig> {
+  return resolveModelForAgent(modelName, agentId);
 }
 
 // ── Main loader ─────────────────────────────────────────────────────
@@ -493,7 +577,9 @@ function resolveModel(modelName: string): string {
  * agent-loader.ts — it loads agent.md files directly and augments
  * them with CMA cookbook configuration.
  */
-export async function loadCMACookbooks(): Promise<LoadedCMA> {
+export async function loadCMACookbooks(
+  memoryInstances?: AgentMemoryMap
+): Promise<LoadedCMA> {
   const parents: Record<string, Agent> = {};
   const subagents: Record<string, SubagentAgentEntry> = {};
   const steering: Record<string, SteeringExample[]> = {};
@@ -626,13 +712,14 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
       instructions:
         parentSystemPrompt +
         formatSubagentAvailability(subagentYAMLs),
-      model: resolveModel(manifest.model),
+      model: resolveModel(manifest.model, cookbookName),
       tools: Object.keys(parentTools).length > 0
         ? (parentTools as any)
         : undefined,
       agents: subagentYAMLs.size > 0 ? subagentAgentInstances : undefined,
       inputProcessors: getAgentInputProcessors(cookbookName),
       outputProcessors: getAgentOutputProcessors(cookbookName),
+      memory: memoryInstances?.[cookbookName] ?? undefined,
     });
 
     console.log(
@@ -692,7 +779,7 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
             .replace(/\b\w/g, (c) => c.toUpperCase()),
           description: `Subagent: ${subName} [${toolDesc.join(", ") || "none"}]`,
           instructions: systemPrompt,
-          model: resolveModel(subYAML.model),
+          model: resolveModel(subYAML.model, subName),
           tools: Object.keys(subTools).length > 0
             ? (subTools as any)
             : undefined,
