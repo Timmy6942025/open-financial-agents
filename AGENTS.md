@@ -18,7 +18,7 @@ Model-agnostic financial services agent platform built on [Mastra](https://mastr
 │   │   ├── cma-skill-loader.ts   # SKILL.md resolution from src/agent-skills/ and src/skills/
 │   │   ├── command-loader.ts     # Slash command loader
 │   │   ├── dispatch.ts           # Subagent dispatch helper (scoped/bare name resolution + timeout)
-│   │   ├── model-router.ts       # Model string validation and CMA alias mapping
+│   │   ├── model-router.ts       # Model string validation, CMA alias mapping, AI Gateway provider
 │   │   └── skill-loader.ts       # Legacy skill loader
 │   ├── mcp/                      # MCP client + 19-server config
 │   │   ├── mcp-client.ts         # MCP connection, auth, tool listing, reconnect
@@ -78,3 +78,28 @@ npm run cli -- run <slug> "prompt"  # run an agent via CLI
 - `@openrouter/ai-sdk-provider@2.9.0`
 - `@mastra/core@1.38.0`, `@mastra/mcp@1.9.0`
 - `@mastra/memory`, `@mastra/libsql` (new)
+
+Skills provide specialized instructions and workflows for specific tasks.
+Use the skill tool to load a skill when a task matches its description.
+<available_skills>
+  <skill>
+    <name>customize-opencode</name>
+    <description>Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself.</description>
+    <location>file:///home/timmy/open-financial-agents/%3Cbuilt-in%3E</location>
+  </skill>
+  <skill>
+    <name>find-skills</name>
+    <description>Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.</description>
+    <location>file:///home/timmy/.agents/skills/find-skills/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>mastra</name>
+    <description>Comprehensive Mastra framework guide for building agents, workflows, tools, memory, workspaces, and storage with current APIs. Use for documentation lookup, API verification, TypeScript setup, common errors, migrations, and `mastra api` CLI tasks: inspect or call resources on local, Mastra platform, or remote servers.</description>
+    <location>file:///home/timmy/.agents/skills/mastra/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>opentui</name>
+    <description>Build terminal UIs with OpenTUI. Covers the core API, native audio, keymaps, React and Solid bindings, components, layout, keyboard input, plugins, and testing.</description>
+    <location>file:///home/timmy/.agents/skills/opentui/SKILL.md</location>
+  </skill>
+</available_skills>
