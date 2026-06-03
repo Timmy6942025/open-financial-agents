@@ -15,7 +15,7 @@
  */
 
 import { readFile, readdir, access } from "node:fs/promises";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 

@@ -25,24 +25,6 @@ if (
 }
 
 import { loadCMACookbooks, type LoadedCMA } from "../src/lib/cma-loader.js";
-import { modelRouter } from "../src/lib/model-router.js";
-
-const FAKE_MODEL = {
-  specificationVersion: "v1",
-  modelId: "smoke-test-model",
-  provider: "smoke",
-} as any;
-
-const realGetModel = (modelRouter as any).getModel;
-(modelRouter as any).getModel = (providerModel: string) => {
-  try {
-    const result = realGetModel.call(modelRouter, providerModel);
-    if (result) return result;
-  } catch {
-    // fall through to fake
-  }
-  return FAKE_MODEL;
-};
 
 const ALLOWED_CMA_TOOLS = new Set([
   "read",

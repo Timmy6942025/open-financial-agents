@@ -210,8 +210,9 @@ export async function connect(): Promise<void> {
     serverDefs[server.name] = def;
     serverNames.push(server.name);
     serverConnectionStatus.set(server.name, "connecting");
+    const hasKey = !!resolveApiKey(server.name);
     console.log(
-      `  ✓ MCP server configured: ${server.name} (${server.url.hostname}) ${describeAuth(server.name)}`
+      `  ✓ MCP server configured: ${server.name} (${server.url.hostname}) ${hasKey ? "[API key set]" : "[no API key]"}`
     );
   }
 
@@ -325,17 +326,6 @@ export async function disconnect(): Promise<void> {
 /**
  * Reconnect a single server by name.
  */
-/**
- * Determine auth status description for a server.
- */
-export function describeAuth(serverName: string): string {
-  const config = resolveAuthConfig(serverName);
-  if (!config) return "[no auth config]";
-  return resolveApiKey(serverName)
-    ? "[API key set]"
-    : "[no API key — may fail]";
-}
-
 export async function reconnectServer(name: string): Promise<void> {
   if (mcpClientInstance) {
     serverConnectionStatus.set(name, "connecting");

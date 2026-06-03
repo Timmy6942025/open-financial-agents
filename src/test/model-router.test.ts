@@ -1,110 +1,61 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { modelRouter } from "../lib/model-router.js";
+import { resolveModelString, validateModelString } from "../lib/model-router.js";
 
-describe("modelRouter singleton", () => {
-  describe("listProviders", () => {
-    it("should return array (possibly empty) of configured providers", () => {
-      const providers = modelRouter.listProviders();
-      expect(Array.isArray(providers)).toBe(true);
-    });
+describe("resolveModelString", () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
   });
 
-  describe("getModel", () => {
-    it("should throw for unconfigured provider", () => {
-      const providers = modelRouter.listProviders();
-      // Only test providers that aren't configured
-      const unconfigured = ["unknown", "nonexistent"].find(
-        (p) => !providers.includes(p as any)
-      );
-      // Arbitrary unknown provider should always throw
-      expect(() => modelRouter.getModel("nonexistent-provider/gpt-4o")).toThrow(
-        'Provider "nonexistent-provider" not configured'
-      );
-    });
-
-    it("should throw for unconfigured Anthropic if no Anthropic API key set", () => {
-      const providers = modelRouter.listProviders();
-      if (!providers.includes("anthropic" as never)) {
-        expect(() => modelRouter.getModel("anthropic/claude-opus-4")).toThrow(
-          'Provider "anthropic" not configured'
-        );
-      }
-    });
-
-    it("should throw for unconfigured Google if no Google API key set", () => {
-      const providers = modelRouter.listProviders();
-      if (!providers.includes("google" as never)) {
-        expect(() => modelRouter.getModel("google/gemini-2.5-pro-exp-03-25")).toThrow(
-          'Provider "google" not configured'
-        );
-      }
-    });
+  it("maps CMA alias 'claude-opus-4-7' to provider/model format", () => {
+    delete process.env.DEFAULT_MODEL;
+    expect(resolveModelString("claude-opus-4-7")).toBe("anthropic/claude-opus-4");
   });
 
-  describe("getModel v5 SDK call path", () => {
-    const originalEnv = { ...process.env };
+  it("maps CMA alias 'claude-sonnet-4-7' to provider/model format", () => {
+    delete process.env.DEFAULT_MODEL;
+    expect(resolveModelString("claude-sonnet-4-7")).toBe("anthropic/claude-sonnet-4");
+  });
 
-    afterEach(() => {
-      process.env = { ...originalEnv };
-      vi.restoreAllMocks();
-    });
+  it("maps CMA alias 'claude-haiku-4-5' to provider/model format", () => {
+    delete process.env.DEFAULT_MODEL;
+    expect(resolveModelString("claude-haiku-4-5")).toBe("anthropic/claude-haiku-4-5");
+  });
 
-    it("calls client.languageModel() and returns a LanguageModel (no property access)", async () => {
-      process.env.ANTHROPIC_API_KEY = "test-key";
-      const { modelRouter: fresh } = await import("../lib/model-router.js");
-      const providers = fresh.listProviders();
-      if (!providers.includes("anthropic" as never)) {
-        return;
-      }
-      const spy = vi.fn().mockReturnValue({
-        modelId: "claude-3-5-sonnet-20241022",
-        provider: "anthropic.messages",
-        specificationVersion: "v1",
-      });
-      const factory = vi.fn().mockReturnValue({ languageModel: spy });
-      (fresh as any).providers.set("anthropic", { factory });
-      const m = fresh.getModel("anthropic/claude-3-5-sonnet-20241022") as any;
-      expect(factory).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith("claude-3-5-sonnet-20241022");
-      expect(m.modelId).toBe("claude-3-5-sonnet-20241022");
-    });
+  it("passes through provider/model strings unchanged", () => {
+    delete process.env.DEFAULT_MODEL;
+    expect(resolveModelString("openai/gpt-4o")).toBe("openai/gpt-4o");
+    expect(resolveModelString("anthropic/claude-opus-4")).toBe("anthropic/claude-opus-4");
+    expect(resolveModelString("openrouter/meta-llama/llama-4-scout")).toBe("openrouter/meta-llama/llama-4-scout");
+  });
 
-    it("falls back to client.chat() when languageModel is missing", async () => {
-      process.env.ANTHROPIC_API_KEY = "test-key";
-      const { modelRouter: fresh } = await import("../lib/model-router.js");
-      if (!fresh.listProviders().includes("anthropic" as never)) return;
-      const chat = vi.fn().mockReturnValue({
-        modelId: "claude-3-5-sonnet-20241022",
-        provider: "anthropic.messages",
-      });
-      const factory = vi.fn().mockReturnValue({ chat });
-      (fresh as any).providers.set("anthropic", { factory });
-      const m = fresh.getModel("anthropic/claude-3-5-sonnet-20241022") as any;
-      expect(chat).toHaveBeenCalledWith("claude-3-5-sonnet-20241022");
-      expect(m.modelId).toBe("claude-3-5-sonnet-20241022");
-    });
+  it("DEFAULT_MODEL env var overrides all mappings", () => {
+    process.env.DEFAULT_MODEL = "anthropic/claude-sonnet-4";
+    expect(resolveModelString("claude-opus-4-7")).toBe("anthropic/claude-sonnet-4");
+    expect(resolveModelString("openai/gpt-4o")).toBe("anthropic/claude-sonnet-4");
+  });
 
-    it("throws when provider client has neither languageModel nor chat", async () => {
-      process.env.ANTHROPIC_API_KEY = "test-key";
-      const { modelRouter: fresh } = await import("../lib/model-router.js");
-      if (!fresh.listProviders().includes("anthropic" as never)) return;
-      const factory = vi.fn().mockReturnValue({});
-      (fresh as any).providers.set("anthropic", { factory });
-      expect(() => fresh.getModel("anthropic/claude-3-5-sonnet-20241022")).toThrow(
-        /languageModel\(\) method/
-      );
-    });
+  it("handles unknown model names by passing them through", () => {
+    delete process.env.DEFAULT_MODEL;
+    expect(resolveModelString("unknown-model")).toBe("unknown-model");
+  });
+});
 
-    it("handles model names containing slashes", () => {
-      process.env.ANTHROPIC_API_KEY = "test-key";
-      const modelRouterLocal = (modelRouter as any);
-      if (!modelRouterLocal.listProviders().includes("anthropic" as never)) return;
-      const spy = vi.fn().mockReturnValue({ modelId: "x", provider: "p" });
-      modelRouterLocal.providers.set("anthropic", {
-        factory: () => ({ languageModel: spy }),
-      });
-      modelRouterLocal.getModel("anthropic/models/x/y");
-      expect(spy).toHaveBeenCalledWith("models/x/y");
-    });
+describe("validateModelString", () => {
+  it("accepts valid provider/model strings", () => {
+    expect(validateModelString("anthropic/claude-opus-4")).toBe(true);
+    expect(validateModelString("openai/gpt-4o")).toBe(true);
+    expect(validateModelString("openrouter/meta-llama/llama-4-scout")).toBe(true);
+  });
+
+  it("throws for strings without a slash", () => {
+    expect(() => validateModelString("claude-opus-4")).toThrow(
+      'Invalid model string "claude-opus-4"'
+    );
+  });
+
+  it("throws for empty strings", () => {
+    expect(() => validateModelString("")).toThrow('Invalid model string ""');
   });
 });

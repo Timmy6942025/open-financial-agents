@@ -1,115 +1,67 @@
 /**
- * Model router - model-agnostic LLM provider layer.
+ * Model router — validates and resolves model strings.
  *
- * Supports any provider through the Vercel AI SDK provider interface.
- * Default providers: OpenAI, Anthropic, Google, Mistral, OpenRouter.
- * Add more by installing the corresponding @ai-sdk/* package.
+ * Mastra accepts model strings like 'anthropic/claude-opus-4' directly
+ * and handles provider registration internally. This module provides
+ * validation and a CMA name → provider/model mapping.
  *
- * Usage: modelRouter.getModel("openai/gpt-4o")
- *         modelRouter.getModel("anthropic/claude-sonnet-4-20250514")
- *         modelRouter.getModel("google/gemini-2.5-pro-exp-03-25")
- *         modelRouter.getModel("openrouter/meta-llama/llama-4-scout")
+ * Usage:
+ *   resolveModelString("claude-opus-4-7")   → "anthropic/claude-opus-4"
+ *   resolveModelString("openai/gpt-4o")     → "openai/gpt-4o"
  */
 
-import { createOpenAI } from "@ai-sdk/openai";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createMistral } from "@ai-sdk/mistral";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import type { LanguageModel } from "ai";
+import { createGatewayProvider } from "@ai-sdk/gateway";
 
-type ProviderName = "openai" | "anthropic" | "google" | "mistral" | "openrouter";
+const MODEL_MAP: Record<string, string> = {
+  "claude-opus-4-7": "anthropic/claude-opus-4",
+  "claude-sonnet-4-7": "anthropic/claude-sonnet-4",
+  "claude-haiku-4-5": "anthropic/claude-haiku-4-5",
+};
 
-type AIProvider =
-  | ReturnType<typeof createOpenAI>
-  | ReturnType<typeof createAnthropic>
-  | ReturnType<typeof createGoogleGenerativeAI>
-  | ReturnType<typeof createMistral>
-  | ReturnType<typeof createOpenRouter>;
+/**
+ * AI Gateway provider — routes all models through Vercel AI Gateway.
+ * Returns null if AI_GATEWAY_API_KEY is not set.
+ */
+export const gatewayProvider = process.env.AI_GATEWAY_API_KEY
+  ? createGatewayProvider({ apiKey: process.env.AI_GATEWAY_API_KEY })
+  : null;
 
-class ModelRouter {
-  private providers: Map<ProviderName, { factory: () => AIProvider }> = new Map();
-
-  constructor() {
-    this.registerProviders();
+/**
+ * Resolve a CMA model name or provider/model string to a Mastra model string.
+ *
+ * - Known CMA aliases are mapped to provider/model format.
+ * - Provider/model strings are passed through unchanged.
+ * - The DEFAULT_MODEL env var overrides all if set.
+ */
+export function resolveModelString(modelName: string): string {
+  if (process.env.DEFAULT_MODEL) {
+    return process.env.DEFAULT_MODEL;
   }
-
-  private registerProviders() {
-    if (process.env.OPENAI_API_KEY) {
-      this.providers.set("openai", {
-        factory: () => createOpenAI({ apiKey: process.env.OPENAI_API_KEY! }),
-      });
-    }
-
-    if (process.env.ANTHROPIC_API_KEY) {
-      this.providers.set("anthropic", {
-        factory: () => createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY! }),
-      });
-    }
-
-    if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-      this.providers.set("google", {
-        factory: () => createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY! }),
-      });
-    }
-
-    if (process.env.MISTRAL_API_KEY) {
-      this.providers.set("mistral", {
-        factory: () => createMistral({ apiKey: process.env.MISTRAL_API_KEY! }),
-      });
-    }
-
-    if (process.env.OPENROUTER_API_KEY) {
-      this.providers.set("openrouter", {
-        factory: () => createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! }),
-      });
-    }
-  }
-
-  /**
-   * Get a model instance by provider/model string.
-   * Examples: "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514",
-   *          "openrouter/meta-llama/llama-4-scout"
-   *
-   * Uses Vercel AI SDK v6's languageModel() method on the provider client.
-   */
-  getModel(providerModel: string): LanguageModel {
-    const [provider, ...modelParts] = providerModel.split("/");
-    const modelName = modelParts.join("/");
-
-    const config = this.providers.get(provider as ProviderName);
-    if (!config) {
-      throw new Error(
-        `Provider "${provider}" not configured. Set the corresponding API key. ` +
-        `Available: ${Array.from(this.providers.keys()).join(", ")}`
-      );
-    }
-
-    const client = config.factory() as unknown as {
-      languageModel?: (id: string) => LanguageModel;
-      chat?: (id: string) => LanguageModel;
-    };
-
-    if (typeof client.languageModel === "function") {
-      return client.languageModel(modelName);
-    }
-
-    if (typeof client.chat === "function") {
-      return client.chat(modelName);
-    }
-
-    throw new Error(
-      `Provider "${provider}" does not expose a languageModel() method. ` +
-      `This port targets @ai-sdk/* v3.x (v6 SDK).`
-    );
-  }
-
-  /**
-   * List all available providers that have API keys configured.
-   */
-  listProviders(): string[] {
-    return Array.from(this.providers.keys());
-  }
+  return MODEL_MAP[modelName] || modelName;
 }
 
-export const modelRouter = new ModelRouter();
+/**
+ * Resolve a model for use with processors and guardrails.
+ * Returns a LanguageModelV3 instance when AI Gateway is configured,
+ * otherwise returns the model string for Mastra's model router.
+ */
+export function resolveGuardrailModel(modelName: string): string | ReturnType<NonNullable<typeof gatewayProvider>["languageModel"]> {
+  if (gatewayProvider) {
+    return gatewayProvider.languageModel(resolveModelString(modelName));
+  }
+  return resolveModelString(modelName);
+}
+
+/**
+ * Validate that a model string has the expected "provider/model" format.
+ * Returns true if valid, throws if not.
+ */
+export function validateModelString(modelString: string): boolean {
+  const parts = modelString.split("/");
+  if (parts.length < 2) {
+    throw new Error(
+      `Invalid model string "${modelString}" — expected "provider/model" format (e.g., "anthropic/claude-opus-4")`
+    );
+  }
+  return true;
+}

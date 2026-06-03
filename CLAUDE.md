@@ -11,15 +11,14 @@ Model-agnostic financial services agent platform built on [Mastra](https://mastr
 │   │   └── <slug>.md
 │   ├── workflows/                # 10 Mastra workflows — one per agent (CMA depth-1 pattern)
 │   │   └── <slug>-workflow.ts
-│   ├── tools/                    # CMA tool implementations + subagent dispatch
-│   │   ├── cma-tools.ts          # Read/Write/Edit/Grep/Glob/Bash tool wrappers
-│   │   └── cma-agent-tool.ts     # Dynamic subagent dispatch tool
+│   ├── tools/                    # CMA tool implementations
+│   │   └── cma-tools.ts          # Read/Write/Edit/Grep/Glob/Bash tool wrappers
 │   ├── lib/                      # Shared utilities
 │   │   ├── cma-loader.ts         # Single-pass CMA cookbook loader (agent.md + YAML → Mastra Agent)
 │   │   ├── cma-skill-loader.ts   # SKILL.md resolution from src/agent-skills/ and src/skills/
 │   │   ├── command-loader.ts     # Slash command loader
 │   │   ├── dispatch.ts           # Subagent dispatch helper (scoped/bare name resolution + timeout)
-│   │   ├── model-router.ts       # Model-agnostic LLM provider layer (OpenAI/Anthropic/Google/Mistral)
+│   │   ├── model-router.ts       # Model string validation and CMA alias mapping
 │   │   └── skill-loader.ts       # Legacy skill loader
 │   ├── mcp/                      # MCP client + 19-server config
 │   │   ├── mcp-client.ts         # MCP connection, auth, tool listing, reconnect
@@ -61,8 +60,12 @@ npm run cli -- run <slug> "prompt"  # run an agent via CLI
 
 ## Architecture
 
-- **CMA depth-1 pattern**: parent orchestrator → read-only leaf workers → single write-holder
+- **CMA depth-1 pattern**: parent supervisor orchestrator → subagent delegation via `agent-<key>` tools → leaf workers
 - **Tool gating**: per-subagent Read/Write/Edit/Grep/Glob/Bash via `agent_toolset_20260401`
 - **MCP routing**: only the data servers declared per subagent
+- **Guardrail processors**: PromptInjectionDetector, PIIDetector, ModerationProcessor on agents handling untrusted data
+- **Structured output**: Mastra `structuredOutput` enforces JSON schemas at API level (no post-hoc AJV validation)
+- **Model routing**: `resolveModelString()` returns `"provider/model"` strings — Mastra resolves providers internally
+- **Memory**: `@mastra/memory` + `@mastra/libsql` for conversation context on key agents (meeting-prep, earnings-reviewer, pitch-agent)
 - **Cross-agent handoff**: `handoff_request` JSON parsed from output, validated against allowlist, routed to target agent
 - **Fan-out**: `coverage-list` syntax triggers batch processing across ticker lists

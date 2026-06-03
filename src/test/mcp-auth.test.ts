@@ -4,13 +4,11 @@
  * Covers:
  *  - resolveApiKey(): env key resolution, aliases, missing keys
  *  - buildRequestInit(): header construction, Bearer prefix, missing key
- *  - resolveAuthConfig(): alias chaining
- *  - describeAuth(): status strings
  *  - check.ts section 5: agent-skill SKILL.md existence (nesting level)
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { resolveApiKey, buildRequestInit, describeAuth } from "../mcp/mcp-client.js";
+import { resolveApiKey, buildRequestInit } from "../mcp/mcp-client.js";
 
 // We import the check.ts validation inline via exec for isolated testing
 import { readdirSync, existsSync, statSync, readFileSync } from "node:fs";
@@ -115,33 +113,6 @@ describe("buildRequestInit", () => {
     expect(result).toEqual({
       headers: { Authorization: "Bearer sp-key" },
     });
-  });
-});
-
-// ─── describeAuth tests ─────────────────────────────────────────────────
-
-describe("describeAuth", () => {
-  beforeEach(() => {
-    delete process.env.MOODYS_API_KEY;
-    delete process.env.MTNEWSWIRE_API_KEY;
-  });
-
-  it("should return '[no auth config]' for unknown server", () => {
-    expect(describeAuth("totally_UNKNOWN")).toBe("[no auth config]");
-  });
-
-  it("should return '[no API key — may fail]' when key not set", () => {
-    expect(describeAuth("moodys")).toBe("[no API key — may fail]");
-  });
-
-  it("should return '[API key set]' when key is set", () => {
-    process.env.MOODYS_API_KEY = "moodys-key";
-    expect(describeAuth("moodys")).toBe("[API key set]");
-  });
-
-  it("should follow alias for describeAuth", () => {
-    process.env.SP_GLOBAL_API_KEY = "sp-key";
-    expect(describeAuth("spglobal")).toBe("[API key set]");
   });
 });
 

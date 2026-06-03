@@ -7,7 +7,7 @@
  */
 
 import type { Mastra } from "@mastra/core/mastra";
-import { validateSubagentOutput, type ValidationResult } from "./output-schema-validator.js";
+import type { Agent } from "@mastra/core/agent";
 import { getSubagentOutputSchema, type OutputSchema } from "./cma-loader.js";
 
 // ── Handoff types ───────────────────────────────────────────────────
@@ -65,6 +65,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]).finally(() => clearTimeout(timer!));
 }
 
+/**
+ * Resolve a subagent by scoped key or bare name.
+ * Returns the Agent instance or null if not found.
+ */
+function resolveAgent(mastra: Mastra, subagentId: string): Agent | null {
+  if (subagentId.includes("/")) {
+    return mastra.getAgent(subagentId) ?? null;
+  }
+  const allAgents = (mastra as unknown as Record<string, unknown>).agents ?? ({} as Record<string, unknown>);
+  const scopedKey = Object.keys(allAgents).find(
+    (key) => key.endsWith(`/${subagentId}`) || key === subagentId
+  );
+  return scopedKey ? (mastra.getAgent(scopedKey) ?? null) : null;
+}
+
 export interface DispatchOptions {
   timeoutMs?: number;
   outputSchema?: OutputSchema;
@@ -82,9 +97,9 @@ export interface DispatchOptions {
  * 3. Fallback: ask the parent orchestrator to dispatch dynamically
  * 4. Error if neither works
  *
- * If options.outputSchema is provided, the subagent's text output is
- * parsed and validated against the schema. Validation failures throw
- * an Error so the calling workflow can surface or handle them.
+ * If options.outputSchema is provided, uses Mastra's structured output
+ * to enforce the schema at the API level. Falls back to plain text
+ * generation if the model doesn't support structured output with tools.
  *
  * For backward compatibility, the 4th argument may also be a number
  * (timeoutMs) — this preserves the prior positional signature.
@@ -100,19 +115,13 @@ export async function dispatchSubagent(
       ? { timeoutMs: optionsOrTimeout }
       : optionsOrTimeout;
   const { timeoutMs = 60000, outputSchema, skipValidation } = options;
-  const text = await dispatchRaw(mastra, subagentId, prompt, timeoutMs);
 
   if (skipValidation || !outputSchema) {
-    return text;
+    return dispatchRaw(mastra, subagentId, prompt, timeoutMs);
   }
 
-  const result: ValidationResult = await validateSubagentOutput(text, outputSchema);
-  if (!result.valid) {
-    throw new Error(
-      `Subagent "${subagentId}" failed output_schema validation: ${result.error}`
-    );
-  }
-  return text;
+  // Use structured output to enforce schema at the API level
+  return dispatchWithStructuredOutput(mastra, subagentId, prompt, timeoutMs, outputSchema);
 }
 
 async function dispatchRaw(
@@ -121,43 +130,64 @@ async function dispatchRaw(
   prompt: string,
   timeoutMs: number
 ): Promise<string> {
-  if (!subagentId.includes("/")) {
-    const allAgents = (mastra as any).agents || {};
-    const scopedKey = Object.keys(allAgents).find(
-      (key) => key.endsWith(`/${subagentId}`) || key === subagentId
-    );
-    if (scopedKey) {
-      const agent = mastra.getAgent(scopedKey);
-      if (agent) {
-        const result = await withTimeout(agent.generate(prompt), timeoutMs, `Subagent "${subagentId}"`);
-        return result.text;
-      }
-    }
+  const agent = resolveAgent(mastra, subagentId);
+  if (!agent) {
+    throw new Error(`Subagent not found: ${subagentId}`);
+  }
+  const result = await withTimeout(agent.generate(prompt), timeoutMs, `Subagent "${subagentId}"`);
+  return result.text;
+}
+
+/**
+ * Dispatch a subagent with structured output enforcement.
+ * Uses Mastra's structuredOutput to enforce schema at the API level.
+ * Falls back to plain text if the model doesn't support structured output with tools.
+ */
+async function dispatchWithStructuredOutput(
+  mastra: Mastra,
+  subagentId: string,
+  prompt: string,
+  timeoutMs: number,
+  outputSchema: OutputSchema
+): Promise<string> {
+  const agent = resolveAgent(mastra, subagentId);
+  if (!agent) {
     throw new Error(`Subagent not found: ${subagentId}`);
   }
 
-  const agent = mastra.getAgent(subagentId);
-  if (agent) {
+  try {
+    const result = await withTimeout(
+      agent.generate(prompt, {
+        structuredOutput: {
+          schema: outputSchema as unknown as Record<string, unknown>,
+          jsonPromptInjection: true,
+        },
+      }),
+      timeoutMs,
+      `Subagent "${subagentId}"`
+    );
+    // Return the structured object as JSON string for backward compatibility
+    return JSON.stringify(result.object);
+  } catch (err: unknown) {
+    // Only fall back to plain text for structured-output-specific errors.
+    // Re-throw rate limits, auth failures, timeouts, and other real errors.
+    const msg = err instanceof Error ? err.message : String(err);
+    const isStructuredOutputError =
+      msg.includes("structured") ||
+      msg.includes("json") ||
+      msg.includes("schema") ||
+      msg.includes("object") ||
+      msg.includes("Not supported") ||
+      msg.includes("unsupported");
+
+    if (!isStructuredOutputError) {
+      throw err;
+    }
+
+    console.warn(`[dispatch] Structured output failed for "${subagentId}", falling back to plain text: ${msg}`);
     const result = await withTimeout(agent.generate(prompt), timeoutMs, `Subagent "${subagentId}"`);
     return result.text;
   }
-
-  const parts = subagentId.split("/");
-  if (parts.length !== 2) {
-    throw new Error(`Invalid subagent ID format: ${subagentId}`);
-  }
-
-  const orchestrator = mastra.getAgent(parts[0]);
-  if (!orchestrator) {
-    throw new Error(`Orchestrator not found: ${parts[0]}`);
-  }
-
-  const result = await withTimeout(
-    orchestrator.generate(`Call subagent ${parts[1]} with: ${prompt}`),
-    timeoutMs,
-    `Orchestrator "${parts[0]}"`
-  );
-  return result.text;
 }
 
 /**

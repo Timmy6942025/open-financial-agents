@@ -10,11 +10,13 @@
  */
 
 import { Mastra } from "@mastra/core/mastra";
+import { Memory } from "@mastra/memory";
+import { LibSQLStore } from "@mastra/libsql";
 import { loadCMACookbooks, type LoadedCMA } from "../lib/cma-loader.js";
 import { connect as connectMCP } from "../mcp/mcp-client.js";
 import { allCMATools } from "../tools/cma-tools.js";
-import { setMastraInstance } from "../tools/cma-agent-tool.js";
 import { routeHandoff } from "../../scripts/orchestrate.js";
+import { gatewayProvider } from "../lib/model-router.js";
 
 import { pitchWorkflow } from "../workflows/pitch-workflow.js";
 import { glReconcilerWorkflow } from "../workflows/gl-reconciler-workflow.js";
@@ -46,6 +48,17 @@ for (const [key, entry] of Object.entries(cma.subagents)) {
   allAgents[key] = entry.agent;
 }
 
+// Override agent models to use AI Gateway when configured
+if (gatewayProvider) {
+  for (const [name, agent] of Object.entries(allAgents)) {
+    const currentModel = (agent as any).model;
+    if (typeof currentModel === "string") {
+      (agent as any).model = gatewayProvider.languageModel(currentModel);
+    }
+  }
+  console.log(`\n✓ AI Gateway active — routing all models through Vercel AI Gateway`);
+}
+
 console.log(
   `\n✓ Registered ${Object.keys(allAgents).length} agents ` +
   `(${Object.keys(cma.parents).length} orchestrators + ` +
@@ -54,9 +67,15 @@ console.log(
 );
 
 // ── Initialize Mastra ──────────────────────────────────────────────
+const storage = new LibSQLStore({
+  id: "mastra-storage",
+  url: process.env.MASTRA_DB_URL || ":memory:",
+});
+
 export const mastra = new Mastra({
   agents: allAgents,
   tools: allCMATools,
+  storage,
   workflows: {
     pitchWorkflow,
     glReconcilerWorkflow,
@@ -71,8 +90,22 @@ export const mastra = new Mastra({
   },
 });
 
-// Wire up the Mastra instance for cma_agent dynamic dispatch
-setMastraInstance(mastra as any);
+// ── Add memory to agents that benefit from conversation context ────
+const memoryConfig = {
+  lastMessages: 20,
+  observationalMemory: true,
+};
+
+const MEMORY_AGENTS = ["meeting-prep-agent", "earnings-reviewer", "pitch-agent"];
+for (const agentName of MEMORY_AGENTS) {
+  const agent = mastra.getAgent(agentName);
+  if (agent) {
+    (agent as any).memory = new Memory({
+      storage,
+      options: memoryConfig,
+    });
+  }
+}
 
 // Export for CLI, scripts, and handoff routing
 export { cma, allAgents };

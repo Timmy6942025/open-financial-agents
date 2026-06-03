@@ -3,13 +3,10 @@ import { readFileSync, existsSync } from "fs";
 import { parse as parseYaml } from "yaml";
 import { resolve, join } from "path";
 
-const mockModel = { modelId: "mock-model", provider: "mock" } as any;
-
 vi.mock("../lib/model-router.js", () => ({
-  modelRouter: {
-    getModel: vi.fn(() => mockModel),
-    listProviders: vi.fn(() => []),
-  },
+  resolveModelString: vi.fn((_name: string) => "mock/mock-model"),
+  resolveGuardrailModel: vi.fn((_name: string) => "mock/mock-model"),
+  gatewayProvider: null,
 }));
 
 import { loadCMACookbooks, type LoadedCMA } from "../lib/cma-loader.js";

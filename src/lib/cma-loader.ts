@@ -6,12 +6,12 @@
  *
  *  - CMA tool gating (Read/Grep/Glob vs Write/Edit/Bash per subagent)
  *  - MCP server routing (only the servers declared per subagent)
- *  - Output schema injection (JSON schema instructions in system prompt)
+ *  - Guardrail processors (prompt injection, PII detection, moderation)
  *  - Steering examples (few-shot examples in parent system prompt)
  *  - Skill loading (128 SKILL.md files resolved and injected)
  *  - Slash commands (46 command references in parent context)
  *  - Dynamic subagent dispatch (cma_agent tool for runtime delegation)
- *  - Model selection (claude-opus-4-7 to modelRouter)
+ *  - Model selection (claude-opus-4-7 → anthropic/claude-opus-4)
  *
  * Architecture matches the original CMA depth-1 tree:
  *   Parent orchestrator → subagent1 (reader) → subagent2 (processor) → subagent3 (writer)
@@ -21,15 +21,19 @@
  */
 
 import { Agent } from "@mastra/core/agent";
+import {
+  PromptInjectionDetector,
+  PIIDetector,
+  ModerationProcessor,
+} from "@mastra/core/processors";
 import { readFile, readdir } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import yaml from "js-yaml";
-import { modelRouter } from "./model-router.js";
+import { resolveModelString, resolveGuardrailModel } from "./model-router.js";
 import { listTools as listMCPTools } from "../mcp/mcp-client.js";
 import { CMA_TOOLS } from "../tools/cma-tools.js";
-import { agentTool, setSubagentIds, setSubagentSchemas } from "../tools/cma-agent-tool.js";
 import {
   loadAllCMASkills,
   resolveSubagentSkills,
@@ -39,6 +43,93 @@ import {
 } from "./cma-skill-loader.js";
 import { loadCommands } from "./command-loader.js";
 import type { Tool, ToolAction } from "@mastra/core/tools";
+
+// ── Guardrail processor factory ──────────────────────────────────────
+
+const GUARDRAIL_MODEL = resolveGuardrailModel(
+  process.env.GUARDRAIL_MODEL || "openrouter/openai/gpt-oss-safeguard-20b"
+);
+
+/**
+ * Agents that handle untrusted external documents (KYC, earnings, market research)
+ * need prompt injection detection to prevent adversarial content from hijacking.
+ */
+const INJECTION_DETECTED_AGENTS = new Set([
+  "kyc-screener",
+  "earnings-reviewer",
+  "market-researcher",
+  "meeting-prep-agent",
+]);
+
+/**
+ * Agents that handle client PII (meeting prep, KYC) need PII detection
+ * to redact sensitive information from outputs.
+ */
+const PII_DETECTED_AGENTS = new Set([
+  "kyc-screener",
+  "meeting-prep-agent",
+]);
+
+/**
+ * Build input processors for an agent based on its role.
+ */
+function getAgentInputProcessors(agentName: string): any[] {
+  const processors: any[] = [];
+
+  if (INJECTION_DETECTED_AGENTS.has(agentName)) {
+    processors.push(
+      new PromptInjectionDetector({
+        model: GUARDRAIL_MODEL,
+        threshold: 0.8,
+        strategy: "rewrite",
+        detectionTypes: ["injection", "jailbreak", "system-override"],
+      })
+    );
+  }
+
+  if (PII_DETECTED_AGENTS.has(agentName)) {
+    processors.push(
+      new PIIDetector({
+        model: GUARDRAIL_MODEL,
+        threshold: 0.6,
+        strategy: "redact",
+        redactionMethod: "mask",
+        detectionTypes: ["email", "phone", "credit-card"],
+      })
+    );
+  }
+
+  return processors;
+}
+
+/**
+ * Build output processors for an agent.
+ * All agents get moderation; PII-sensitive agents also get PII redaction.
+ */
+function getAgentOutputProcessors(agentName: string): any[] {
+  const processors: any[] = [
+    new ModerationProcessor({
+      model: GUARDRAIL_MODEL,
+      threshold: 0.7,
+      strategy: "block",
+      categories: ["hate", "harassment", "violence"],
+    }),
+  ];
+
+  if (PII_DETECTED_AGENTS.has(agentName)) {
+    processors.push(
+      new PIIDetector({
+        model: GUARDRAIL_MODEL,
+        threshold: 0.6,
+        strategy: "redact",
+        redactionMethod: "mask",
+        detectionTypes: ["email", "phone", "credit-card"],
+      })
+    );
+  }
+
+  return processors;
+}
 
 // ── Path resolution ────────────────────────────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -224,27 +315,6 @@ function filterMCPTools(
   return filtered;
 }
 
-// ── Output schema injection ─────────────────────────────────────────
-
-function formatOutputSchemaInstructions(schema?: OutputSchema): string {
-  if (!schema) return "";
-
-  return `
-## OUTPUT ENFORCEMENT — JSON SCHEMA
-
-Your response MUST be a single JSON object conforming to this schema.
-Return ONLY the JSON — no markdown fences, no preamble, no explanation.
-
-Schema:
-\`\`\`json
-${JSON.stringify(schema, null, 2)}
-\`\`\`
-
-If you cannot produce a result that conforms, return:
-{"_error": "Could not produce schema-valid output", "reason": "<why>"}
-`;
-}
-
 // ── Steering examples injection ─────────────────────────────────────
 
 function formatSteeringExamples(examples: SteeringExample[]): string {
@@ -332,19 +402,18 @@ function formatSubagentAvailability(
     ].join(", ");
 
     lines.push(
-      `- **${name}** — ${toolDesc || "no tools"}${hasWrite ? " ⚡ WRITE-holder" : ""}`
+      `- **agent-${name}** — ${toolDesc || "no tools"}${hasWrite ? " ⚡ WRITE-holder" : ""}`
     );
   }
 
   return `
 ## SUBAGENTS AVAILABLE
 
-You can dispatch work to these specialized subagents using the \`cma_agent\` tool.
-Call \`cma_agent(subagent="<id>", prompt="<task>")\` to delegate.
+You have specialized subagents available as tools. Each is prefixed with \`agent-\`.
+Use the tool directly to delegate work — Mastra handles routing and context passing.
 
 ${lines.join("\n")}
 
-The subagent ID is the exact name shown above (e.g., "pitch-researcher").
 Only ONE subagent holds Write — use it as the final step for file output.
 `;
 }
@@ -409,15 +478,8 @@ function extractSkillReferences(text: string): string[] {
 
 // ── Model resolution ────────────────────────────────────────────────
 
-function resolveModel(modelName: string): any {
-  const mapping: Record<string, string> = {
-    "claude-opus-4-7": "anthropic/claude-opus-4",
-    "claude-sonnet-4-7": "anthropic/claude-sonnet-4",
-    "claude-haiku-4-5": "anthropic/claude-haiku-4-5",
-  };
-
-  const modelId = mapping[modelName] || modelName;
-  return modelRouter.getModel(process.env.DEFAULT_MODEL || modelId);
+function resolveModel(modelName: string): string {
+  return resolveModelString(modelName);
 }
 
 // ── Main loader ─────────────────────────────────────────────────────
@@ -552,10 +614,8 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
       // No subagents dir
     }
 
-    // ── Add cma_agent tool if there are subagents ────────────────
-    if (subagentYAMLs.size > 0) {
-      parentTools = mergeTools(parentTools, { cma_agent: agentTool as any });
-    }
+    // Collect subagent Agent instances for supervisor delegation
+    const subagentAgentInstances: Record<string, Agent> = {};
 
     parents[cookbookName] = new Agent({
       id: `${cookbookName}-orchestrator`,
@@ -570,6 +630,9 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
       tools: Object.keys(parentTools).length > 0
         ? (parentTools as any)
         : undefined,
+      agents: subagentYAMLs.size > 0 ? subagentAgentInstances : undefined,
+      inputProcessors: getAgentInputProcessors(cookbookName),
+      outputProcessors: getAgentOutputProcessors(cookbookName),
     });
 
     console.log(
@@ -604,8 +667,7 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
       // Build system prompt
       const systemPrompt =
         subYAML.system.text +
-        formatSkillsForPrompt(subSkills) +
-        formatOutputSchemaInstructions(subYAML.output_schema);
+        formatSkillsForPrompt(subSkills);
 
       // Tool descriptions
       const toolDesc: string[] = [];
@@ -634,10 +696,14 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
           tools: Object.keys(subTools).length > 0
             ? (subTools as any)
             : undefined,
+          inputProcessors: getAgentInputProcessors(subName),
+          outputProcessors: getAgentOutputProcessors(subName),
         }),
       };
 
       subagents[key] = entry;
+      // Register for supervisor delegation (parent uses agent-<subName> tools)
+      subagentAgentInstances[subName] = entry.agent;
       // Deduplicate by bare subagent name — first occurrence wins (same name across cookbooks is a collision)
       if (!allSubagentIds.includes(subName)) {
         allSubagentIds.push(subName);
@@ -650,17 +716,6 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
       );
     }
   }
-
-  // Register subagent IDs for dynamic dispatch
-  setSubagentIds(allSubagentIds);
-
-  // Register subagent output_schemas for runtime validation
-  setSubagentSchemas(
-    Object.entries(subagents).map(([key, entry]) => ({
-      key,
-      schema: entry.yaml.output_schema,
-    }))
-  );
 
   cachedCMA = { parents, subagents, steering, subagentIds: allSubagentIds };
   return cachedCMA;
