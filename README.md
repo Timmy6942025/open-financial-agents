@@ -1,6 +1,6 @@
 # Open Financial Agents
 
-Model-agnostic, open-source financial services agent platform — ported from [Anthropic's financial-services reference library](https://github.com/anthropics/financial-services) and built on [Mastra](https://mastra.ai) with support for any LLM provider (OpenAI, Anthropic, Google, Mistral).
+Model-agnostic, open-source financial services agent platform — ported from [Anthropic's financial-services reference library](https://github.com/anthropics/financial-services) and built on [Mastra](https://mastra.ai) with support for any LLM provider (OpenAI, Anthropic, Google, Mistral, OpenRouter, or Vercel AI Gateway).
 
 Everything here is available as Mastra agents. Same system prompts, same skills — deploy as a Mastra server, run via CLI, or integrate into your own application.
 
@@ -30,12 +30,12 @@ For Managed Agent deployment — `agent.yaml`, leaf-worker subagents, steering-e
 src/                           # All source code
   agents/                      # 10 agent .md files (canonical system prompts)
   workflows/                   # 10 Mastra workflows
-  tools/                       # CMA tool implementations + subagent dispatch
+  tools/                       # CMA tool implementations (read/write/edit/grep/glob/bash)
   lib/                         # Shared utilities (CMA loader, model router, dispatch)
   mcp/                         # MCP client + 19-server data connector configs
   commands/                    # 40+ slash commands
   skills/                      # 7 vertical skill directories (source of truth)
-  agent-skills/                # Bundled skill copies per agent
+  agent-skills/                # Bundled skill copies per agent (synced from src/skills/)
   test/                        # Vitest tests
 managed-agent-cookbooks/       # CMA cookbooks — one dir per agent
 partner-plugins/               # Partner-authored plugins (LSEG, S&P Global)
@@ -50,6 +50,27 @@ scripts/                       # check · deploy · sync · validate · orchestr
 ```bash
 npm install            # installs dependencies
 cp .env.example .env   # configure API keys
+```
+
+### Environment Variables
+
+```bash
+# LLM provider (pick one)
+OPENAI_API_KEY=sk-...              # OpenAI
+ANTHROPIC_API_KEY=sk-ant-...       # Anthropic
+GOOGLE_GENERATIVE_AI_API_KEY=...   # Google
+MISTRAL_API_KEY=...                # Mistral
+OPENROUTER_API_KEY=sk-or-...       # OpenRouter
+
+# Vercel AI Gateway (routes through gateway.vercel.sh)
+AI_GATEWAY_API_KEY=vck_...         # AI Gateway key
+DEFAULT_MODEL=minimax/minimax-m3   # Model to use via gateway
+
+# Guardrails (optional, defaults to openrouter/openai/gpt-oss-safeguard-20b)
+GUARDRAIL_MODEL=anthropic/claude-haiku-4-5
+
+# Storage (optional, defaults to in-memory)
+MASTRA_DB_URL=file:./mastra.db     # LibSQL for conversation memory
 ```
 
 ### Run the CLI
@@ -73,7 +94,7 @@ npm run dev            # start Mastra dev server on :4111
 ```bash
 npx tsc --noEmit       # TypeScript type-check (must pass before commit)
 npx tsx scripts/check.ts  # Lint manifests + verify cross-file refs
-npm test               # Run vitest tests
+npm test               # Run vitest tests (55 tests)
 ```
 
 ## How It Fits Together
@@ -86,6 +107,40 @@ npm test               # Run vitest tests
 | **Commands** | Slash actions you trigger explicitly (`/comps`, `/earnings`, `/ic-memo`) | `src/commands/` |
 | **Connectors** | [MCP servers](https://modelcontextprotocol.io/) that wire agents to financial data | `src/mcp/mcp.json` |
 | **Managed-agent wrappers** | `agent.yaml` + depth-1 subagents + steering examples for headless deployment | `managed-agent-cookbooks/<slug>/` |
+
+## Architecture
+
+### CMA Depth-1 Pattern
+
+Parent orchestrator → subagent delegation via `agent-<key>` tools → leaf workers.
+
+- **Supervisor agents**: Parent orchestrators use Mastra's `agents` config with subagent Agent instances. Mastra creates `agent-<key>` tools automatically.
+- **Workflow dispatch**: `dispatchSubagentValidated()` resolves scoped/bare agent names with timeout.
+- **Tool gating**: Per-subagent Read/Write/Edit/Grep/Glob/Bash via `agent_toolset_20260401`.
+- **MCP routing**: Only the data servers declared per subagent.
+- **Cross-agent handoff**: `handoff_request` JSON parsed from output, validated against allowlist, routed to target agent.
+- **Fan-out**: `coverage-list` syntax triggers batch processing across ticker lists.
+
+### Guardrail Processors
+
+All agents handling untrusted data get:
+- **PromptInjectionDetector** — detects injection, jailbreak, system-override attacks (kyc-screener, earnings-reviewer, market-researcher, meeting-prep-agent)
+- **PIIDetector** — redacts email, phone, credit-card (kyc-screener, meeting-prep-agent)
+- **ModerationProcessor** — blocks hate, harassment, violence on all agent outputs
+
+### Memory
+
+Conversation context via `@mastra/memory` + `@mastra/libsql`:
+- meeting-prep-agent, earnings-reviewer, pitch-agent
+- 20-message window, observational memory enabled
+
+### Structured Output
+
+Mastra's `structuredOutput` enforces JSON schemas at the API level (no post-hoc validation). Falls back to plain text if the model doesn't support structured output with tools.
+
+### Model Routing
+
+`resolveModelString()` returns `"provider/model"` strings — Mastra resolves providers internally. When AI Gateway is configured, all models route through `ai-gateway.vercel.sh` automatically.
 
 ## MCP Integrations
 
@@ -118,6 +173,11 @@ All connectors are configured in `src/mcp/mcp.json`. Supports 19 financial data 
 | **[wealth-management](./src/skills/wealth-management)** | Client reviews, financial plans, rebalancing, reporting |
 | **[fund-admin](./src/skills/fund-admin)** | GL recon, break tracing, accruals, roll-forwards, NAV tie-out |
 | **[operations](./src/skills/operations)** | KYC document parsing and rules-grid evaluation |
+
+51 bundled skills across 10 agents. Sync from source with:
+```bash
+npx tsx scripts/sync-skills.ts
+```
 
 ## Making It Yours
 

@@ -69,3 +69,12 @@ npm run cli -- run <slug> "prompt"  # run an agent via CLI
 - **Memory**: `@mastra/memory` + `@mastra/libsql` for conversation context on key agents (meeting-prep, earnings-reviewer, pitch-agent)
 - **Cross-agent handoff**: `handoff_request` JSON parsed from output, validated against allowlist, routed to target agent
 - **Fan-out**: `coverage-list` syntax triggers batch processing across ticker lists
+- **AI Gateway**: All models route through `ai-gateway.vercel.sh` when `AI_GATEWAY_API_KEY` is set. Uses `@ai-sdk/gateway` provider. Guardrail models also route through gateway.
+
+## Packages
+
+- `ai@6.0.195` — AI SDK v6
+- `@ai-sdk/openai@3.0.67`, `@ai-sdk/anthropic@3.0.81`, `@ai-sdk/google@3.0.80`, `@ai-sdk/mistral@3.0.37`
+- `@openrouter/ai-sdk-provider@2.9.0`
+- `@mastra/core@1.38.0`, `@mastra/mcp@1.9.0`
+- `@mastra/memory`, `@mastra/libsql` (new)
