@@ -2,27 +2,30 @@
  * Model router - model-agnostic LLM provider layer.
  *
  * Supports any provider through the Vercel AI SDK provider interface.
- * Default providers: OpenAI, Anthropic, Google, Mistral.
+ * Default providers: OpenAI, Anthropic, Google, Mistral, OpenRouter.
  * Add more by installing the corresponding @ai-sdk/* package.
  *
  * Usage: modelRouter.getModel("openai/gpt-4o")
  *         modelRouter.getModel("anthropic/claude-sonnet-4-20250514")
  *         modelRouter.getModel("google/gemini-2.5-pro-exp-03-25")
+ *         modelRouter.getModel("openrouter/meta-llama/llama-4-scout")
  */
 
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createMistral } from "@ai-sdk/mistral";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 
-type ProviderName = "openai" | "anthropic" | "google" | "mistral";
+type ProviderName = "openai" | "anthropic" | "google" | "mistral" | "openrouter";
 
 type AIProvider =
   | ReturnType<typeof createOpenAI>
   | ReturnType<typeof createAnthropic>
   | ReturnType<typeof createGoogleGenerativeAI>
-  | ReturnType<typeof createMistral>;
+  | ReturnType<typeof createMistral>
+  | ReturnType<typeof createOpenRouter>;
 
 class ModelRouter {
   private providers: Map<ProviderName, { factory: () => AIProvider }> = new Map();
@@ -55,13 +58,20 @@ class ModelRouter {
         factory: () => createMistral({ apiKey: process.env.MISTRAL_API_KEY! }),
       });
     }
+
+    if (process.env.OPENROUTER_API_KEY) {
+      this.providers.set("openrouter", {
+        factory: () => createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! }),
+      });
+    }
   }
 
   /**
    * Get a model instance by provider/model string.
-   * Examples: "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514"
+   * Examples: "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514",
+   *          "openrouter/meta-llama/llama-4-scout"
    *
-   * Uses Vercel AI SDK v5's languageModel() method on the provider client.
+   * Uses Vercel AI SDK v6's languageModel() method on the provider client.
    */
   getModel(providerModel: string): LanguageModel {
     const [provider, ...modelParts] = providerModel.split("/");
@@ -90,7 +100,7 @@ class ModelRouter {
 
     throw new Error(
       `Provider "${provider}" does not expose a languageModel() method. ` +
-      `This port targets @ai-sdk/* v1.x (v5 SDK).`
+      `This port targets @ai-sdk/* v3.x (v6 SDK).`
     );
   }
 

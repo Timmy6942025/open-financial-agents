@@ -409,7 +409,7 @@ function extractSkillReferences(text: string): string[] {
 
 // ── Model resolution ────────────────────────────────────────────────
 
-function resolveModel(modelName: string) {
+function resolveModel(modelName: string): any {
   const mapping: Record<string, string> = {
     "claude-opus-4-7": "anthropic/claude-opus-4",
     "claude-sonnet-4-7": "anthropic/claude-sonnet-4",
