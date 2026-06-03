@@ -1,0 +1,6 @@
+{
+  "name": "pitch-agent",
+  "version": "0.1.0",
+  "description": "End-to-end investment banking pitch agent. Given a target company and a strategic situation, autonomously pulls comps and precedents from market data, builds a DCF and football-field valuation in Excel, and generates a branded pitch deck on the bank's PowerPoint template.",
+  "author": { "name": "open-financial-agents" }
+}

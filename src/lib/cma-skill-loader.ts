@@ -25,14 +25,6 @@ let skillsCache: Record<string, LoadedSkill> | null = null;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..", "..");
 
-/** Agent plugin skills in the official anthropic-financial-services repo */
-const ANTHROPIC_AGENT_PLUGINS = join(
-  PROJECT_ROOT,
-  "anthropic-financial-services",
-  "plugins",
-  "agent-plugins"
-);
-
 /**
  * Our local agent skill bundles — mirrors the structure of the official
  * agent-plugins but lives under src/agent-skills/{agent}/skills/{skill}/SKILL.md
@@ -53,7 +45,6 @@ const PARTNER_PLUGINS = join(PROJECT_ROOT, "partner-plugins");
 const SRC_SKILLS = join(PROJECT_ROOT, "src", "skills");
 
 interface SkillDef {
-  from_plugin?: string;
   path?: string;
 }
 
@@ -70,7 +61,7 @@ export interface LoadedSkill {
 }
 
 /**
- * Load ALL SKILL.md files from the anthropic agent-plugins and partner-plugins.
+ * Load ALL SKILL.md files from local agent-skills and partner-plugins.
  * Returns a flat map of skill name → LoadedSkill.
  */
 export async function loadAllCMASkills(): Promise<Record<string, LoadedSkill>> {
@@ -81,10 +72,7 @@ export async function loadAllCMASkills(): Promise<Record<string, LoadedSkill>> {
 
   const skills: Record<string, LoadedSkill> = {};
 
-  // 1. Anthropic agent-plugins (external repo — may not exist locally)
-  await loadAgentPluginSkills(ANTHROPIC_AGENT_PLUGINS, skills);
-
-  // 2. Our local agent skill bundles (src/agent-skills/)
+  // 1. Our local agent skill bundles (src/agent-skills/)
   // This is the primary local source — mirrors the official agent-plugins structure
   await loadAgentPluginSkills(SRC_AGENT_SKILLS, skills);
 

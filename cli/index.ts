@@ -41,27 +41,55 @@ program
   .command("list")
   .description("List all available agents")
   .action(async () => {
-    const files = readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md"));
+    let entries: Array<{ slug: string; name: string; description: string }> = [];
 
-    console.log(chalk.bold("\nAvailable agents:\n"));
+    try {
+      const { mastra } = await import("../src/mastra/index.js");
+      const agents = (mastra as any).listAgents ? (mastra as any).listAgents() : (mastra as any).agents || {};
+      entries = Object.entries(agents)
+        .filter(([key]) => !key.includes("/"))
+        .map(([slug, agent]: [string, any]) => {
+          return {
+            slug,
+            name: agent?.name || slug,
+            description: agent?.description || "",
+          };
+        });
+    } catch {
+      // Fall back to file-system listing if Mastra can't be loaded
+    }
 
-    for (const file of files) {
+    if (entries.length === 0) {
+      const files = readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md"));
       const { default: matter } = await import("gray-matter");
       const { readFileSync } = await import("node:fs");
-      const text = readFileSync(join(AGENTS_DIR, file), "utf-8");
-
-      try {
-        const { data } = matter(text);
-        const slug = file.replace(".md", "");
-        const name = data.name || slug;
-        const desc = data.description || "(no description)";
-
-        console.log(`  ${chalk.cyan.bold(slug)} — ${chalk.white(name)}`);
-        console.log(`    ${chalk.gray(desc)}`);
-        console.log();
-      } catch {
-        console.log(`  ${chalk.cyan(file.replace(".md", ""))}`);
+      for (const file of files) {
+        const text = readFileSync(join(AGENTS_DIR, file), "utf-8");
+        try {
+          const { data } = matter(text);
+          entries.push({
+            slug: file.replace(".md", ""),
+            name: data.name || file.replace(".md", ""),
+            description: data.description || "(no description)",
+          });
+        } catch {
+          entries.push({
+            slug: file.replace(".md", ""),
+            name: file.replace(".md", ""),
+            description: "(no description)",
+          });
+        }
       }
+    }
+
+    console.log(chalk.bold(`\nAvailable agents (${entries.length}):\n`));
+
+    for (const { slug, name, description } of entries) {
+      console.log(`  ${chalk.cyan.bold(slug)} — ${chalk.white(name)}`);
+      if (description) {
+        console.log(`    ${chalk.gray(description)}`);
+      }
+      console.log();
     }
   });
 

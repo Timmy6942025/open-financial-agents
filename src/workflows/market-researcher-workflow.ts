@@ -10,7 +10,7 @@
 import { createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
-import { dispatchSubagent } from "../lib/dispatch.js";
+import { dispatchSubagentValidated } from "../lib/dispatch.js";
 import { defineStep } from "../lib/step-utils.js";
 
 export const marketResearcherWorkflow = createWorkflow({
@@ -38,14 +38,14 @@ export const marketResearcherWorkflow = createWorkflow({
           const entries = fanOutCoverageList(input.sector, coverageList);
           const results = await Promise.all(
             entries.map(async (e) => {
-              const res = await dispatchSubagent(mastra, "market-researcher/market-sector-reader",
+              const res = await dispatchSubagentValidated(mastra, "market-researcher/market-sector-reader",
                 `Read third-party research and issuer materials for sector: ${e.ticker}, extract market-size, growth, and landscape facts. Return schema-validated JSON.`);
               return `${e.ticker}: ${res}`;
             })
           );
           return { overview: results.join("\n\n---\n\n") };
         }
-        const result = await dispatchSubagent(mastra, "market-researcher/market-sector-reader",
+        const result = await dispatchSubagentValidated(mastra, "market-researcher/market-sector-reader",
           `Read third-party research and issuer materials for sector: ${input.sector}, extract market-size, growth, and landscape facts. ${input.angle ? `Angle: ${input.angle}. ` : ""}Return schema-validated JSON.`);
         let handoff: unknown;
         try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
@@ -61,7 +61,7 @@ export const marketResearcherWorkflow = createWorkflow({
       outputSchema: z.object({ compsSpread: z.string(), handoff: z.unknown().optional() }),
       passthroughMapper: (input) => ({ compsSpread: input.overview, handoff: input.handoff }),
       execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagent(mastra, "market-researcher/market-comps-spreader",
+        const result = await dispatchSubagentValidated(mastra, "market-researcher/market-comps-spreader",
           `Pull trading multiples for the peer set from CapIQ/FactSet MCP and spread them with consistent metric definitions. ${input.overview}`);
         let handoff: unknown;
         try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }
@@ -76,7 +76,7 @@ export const marketResearcherWorkflow = createWorkflow({
       inputSchema: z.object({ compsSpread: z.string(), handoff: z.unknown().optional() }),
       outputSchema: z.object({ primer: z.string(), handoff: z.unknown().optional() }),
       execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagent(mastra, "market-researcher/market-note-writer",
+        const result = await dispatchSubagentValidated(mastra, "market-researcher/market-note-writer",
           `Take the overview, landscape, comps spread, and ideas shortlist and produce ./out/primer-sector.docx. ${input.compsSpread}`);
         let handoff: unknown;
         try { handoff = extractHandoff(result); } catch { /* not JSON, skip */ }

@@ -1,0 +1,6 @@
+{
+  "name": "market-researcher",
+  "version": "0.1.0",
+  "description": "Produces sector or thematic market research — industry overview, competitive landscape, trading-comps spread of the peer set, and a thematic ideas shortlist — packaged as a research note with optional slides. Use when an analyst or PM asks for a primer on a sector or theme; not for single-name coverage updates (use earnings-reviewer for that).",
+  "author": { "name": "open-financial-agents" }
+}

@@ -11,9 +11,9 @@
  */
 
 import type { Agent } from "@mastra/core/agent";
-import { z } from "zod";
+import { parseHandoffRequest, type HandoffRequest } from "../src/lib/dispatch.js";
 
-const HANDOFF_RE = /\{"type":\s*"handoff_request".*?\}/s;
+export type { HandoffRequest };
 
 const ALLOWED_TARGETS = new Set([
   "pitch-agent",
@@ -30,38 +30,15 @@ const ALLOWED_TARGETS = new Set([
 
 export { ALLOWED_TARGETS };
 
-const HandoffPayloadSchema = z.object({
-  event: z.string().max(2000),
-  context_ref: z.string().max(256).regex(/^[A-Za-z0-9 ._/:#-]+$/).optional(),
-});
-
-const HandoffRequestSchema = z.object({
-  type: z.literal("handoff_request"),
-  target_agent: z.string(),
-  payload: HandoffPayloadSchema,
-});
-
-export type HandoffRequest = z.infer<typeof HandoffRequestSchema>;
-
 /**
  * Extract a handoff request from agent output text.
- * Returns null if no valid handoff is found.
+ * Returns null if no valid handoff is found or target is not in allowlist.
  */
 export function extractHandoff(text: string): HandoffRequest | null {
-  const match = HANDOFF_RE.exec(text);
-  if (!match) return null;
-
-  try {
-    const obj = JSON.parse(match[0]);
-    const parsed = HandoffRequestSchema.safeParse(obj);
-
-    if (!parsed.success) return null;
-    if (!ALLOWED_TARGETS.has(parsed.data.target_agent)) return null;
-
-    return parsed.data;
-  } catch {
-    return null;
-  }
+  const handoff = parseHandoffRequest(text);
+  if (!handoff) return null;
+  if (!ALLOWED_TARGETS.has(handoff.target_agent)) return null;
+  return handoff;
 }
 
 /**

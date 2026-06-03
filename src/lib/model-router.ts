@@ -61,7 +61,7 @@ class ModelRouter {
    * Get a model instance by provider/model string.
    * Examples: "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514"
    *
-   * Uses type-safe Vercel AI SDK model() method instead of property access.
+   * Uses Vercel AI SDK v5's languageModel() method on the provider client.
    */
   getModel(providerModel: string): LanguageModel {
     const [provider, ...modelParts] = providerModel.split("/");
@@ -75,43 +75,23 @@ class ModelRouter {
       );
     }
 
-    const client = config.factory();
+    const client = config.factory() as unknown as {
+      languageModel?: (id: string) => LanguageModel;
+      chat?: (id: string) => LanguageModel;
+    };
 
-    // Type-safe model lookup via Vercel AI SDK's model() method
-    // The model name uses "provider/model" format (e.g. "openai/gpt-4o")
-    const fullModelId = providerModel; // e.g. "openai/gpt-4o"
-
-    // Use type assertion to the Vercel AI SDK's model method
-    // This is the correct API for getting models from provider instances
-    try {
-      const modelGetter = (client as unknown as Record<string, (modelId: string) => LanguageModel>)["model"];
-      if (typeof modelGetter === "function") {
-        return modelGetter(fullModelId);
-      }
-    } catch {
-      // Fall through to property access
+    if (typeof client.languageModel === "function") {
+      return client.languageModel(modelName);
     }
 
-    // Fallback: property access on provider (how Vercel AI SDK exposes models)
-    const providerKey = provider as ProviderName;
-    if (providerKey === "openai") {
-      const openaiClient = client as ReturnType<typeof createOpenAI>;
-      return (openaiClient as any)[modelName] as LanguageModel;
-    }
-    if (providerKey === "anthropic") {
-      const anthropicClient = client as ReturnType<typeof createAnthropic>;
-      return (anthropicClient as any)[modelName] as LanguageModel;
-    }
-    if (providerKey === "google") {
-      const googleClient = client as ReturnType<typeof createGoogleGenerativeAI>;
-      return (googleClient as any)[modelName] as LanguageModel;
-    }
-    if (providerKey === "mistral") {
-      const mistralClient = client as ReturnType<typeof createMistral>;
-      return (mistralClient as any)[modelName] as LanguageModel;
+    if (typeof client.chat === "function") {
+      return client.chat(modelName);
     }
 
-    throw new Error(`Unsupported provider: ${provider}`);
+    throw new Error(
+      `Provider "${provider}" does not expose a languageModel() method. ` +
+      `This port targets @ai-sdk/* v1.x (v5 SDK).`
+    );
   }
 
   /**

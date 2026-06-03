@@ -22,7 +22,6 @@ import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import * as yaml from "yaml";
 import { globSync as gs } from "glob";
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -49,25 +48,6 @@ function err(msg: string) {
 function rel(p: string): string {
   return p.replace(ROOT + "/", "");
 }
-
-function ensureHooksInstalled(): void {
-  const want = ".githooks";
-  try {
-    const cur = execSync(`git -C ${ROOT} config --get core.hooksPath`, {
-      encoding: "utf-8",
-    }).trim();
-    if (cur !== want) {
-      execSync(`git -C ${ROOT} config core.hooksPath ${want}`, {
-        stdio: "pipe",
-      });
-      console.log(`[check.ts] installed git hooks (core.hooksPath -> ${want})`);
-    }
-  } catch {
-    // Not a git checkout or git unavailable — ignore
-  }
-}
-
-ensureHooksInstalled();
 
 const allYamlFiles = gs("managed-agent-cookbooks/**/*.yaml", { cwd: ROOT });
 

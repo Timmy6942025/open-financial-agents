@@ -29,7 +29,7 @@ import yaml from "js-yaml";
 import { modelRouter } from "./model-router.js";
 import { listTools as listMCPTools } from "../mcp/mcp-client.js";
 import { CMA_TOOLS } from "../tools/cma-tools.js";
-import { agentTool, setSubagentIds } from "../tools/cma-agent-tool.js";
+import { agentTool, setSubagentIds, setSubagentSchemas } from "../tools/cma-agent-tool.js";
 import {
   loadAllCMASkills,
   resolveSubagentSkills,
@@ -102,7 +102,7 @@ interface OutputSchemaProperty {
   additionalProperties?: boolean | { type: string };
 }
 
-interface OutputSchema {
+export interface OutputSchema {
   type: "object";
   required: string[];
   additionalProperties: boolean;
@@ -143,6 +143,18 @@ export interface LoadedCMA {
   steering: Record<string, SteeringExample[]>;
   /** All subagent IDs for dynamic dispatch */
   subagentIds: string[];
+}
+
+let cachedCMA: LoadedCMA | null = null;
+
+/** Get the most recently loaded CMA data (or null if not yet loaded) */
+export function getLoadedCMA(): LoadedCMA | null {
+  return cachedCMA;
+}
+
+/** Look up a subagent's output_schema by "cookbook/subagent" key */
+export function getSubagentOutputSchema(key: string): OutputSchema | undefined {
+  return cachedCMA?.subagents[key]?.yaml.output_schema;
 }
 
 // ── YAML parsing ────────────────────────────────────────────────────
@@ -199,9 +211,10 @@ function filterMCPTools(
   allowedServers: Set<string>
 ): Record<string, Tool<any, any, any, any>> {
   if (allowedServers.size === 0) return {};
+  const sortedServers = Array.from(allowedServers).sort((a, b) => b.length - a.length);
   const filtered: Record<string, Tool<any, any, any, any>> = {};
   for (const [toolName, tool] of Object.entries(allTools)) {
-    for (const server of allowedServers) {
+    for (const server of sortedServers) {
       if (toolName.startsWith(server + "_")) {
         filtered[toolName] = tool;
         break;
@@ -251,43 +264,40 @@ ${lines.join("\n")}
 
 // ── Command reference injection ─────────────────────────────────────
 
+const STATIC_COMMAND_ASSOC: Record<string, string[]> = {
+  "pitch-agent": ["comps", "dcf", "lbo", "3-statement-model", "teaser", "cim", "pitch-deck", "merger-model", "one-pager", "process-letter", "deal-tracker", "buyer-list"],
+  "market-researcher": ["comps", "competitive-analysis", "earnings", "earnings-preview", "morning-note", "sector", "thesis", "catalysts", "screen", "initiate"],
+  "earnings-reviewer": ["earnings", "earnings-preview", "model-update", "morning-note"],
+  "model-builder": ["dcf", "lbo", "3-statement-model", "comps", "debug-model", "competitive-analysis"],
+  "valuation-reviewer": ["comps", "dcf", "returns", "ic-memo", "portfolio", "value-creation", "ai-readiness", "unit-economics"],
+  "gl-reconciler": [],
+  "month-end-closer": [],
+  "statement-auditor": [],
+  "kyc-screener": [],
+  "meeting-prep-agent": ["client-review", "client-report", "financial-plan", "rebalance", "proposal", "tlh"],
+};
+
+function getRelevantCommands(
+  cookbookName: string,
+  allCommands: Record<string, string>
+): string[] {
+  const candidates = STATIC_COMMAND_ASSOC[cookbookName] || [];
+  return candidates.filter((c) => allCommands[c] !== undefined);
+}
+
 function formatCommandReference(
   commands: Record<string, string>,
   cookbookName: string
 ): string {
-  // Match commands that are relevant to this cookbook's domain
-  const relevant = Object.entries(commands).filter(([name]) => {
-    const lower = name.toLowerCase();
-    const cookbookLower = cookbookName.toLowerCase();
-    return (
-      lower.includes(cookbookLower) ||
-      cookbookLower.includes(lower.replace(/\//g, "-"))
-    );
-  });
+  const relevant = getRelevantCommands(cookbookName, commands);
 
-  if (relevant.length === 0) {
-    // If no direct match, include all top-level commands
-    const topLevel = Object.entries(commands)
-      .filter(([name]) => !name.includes("/"))
-      .slice(0, 20); // cap to avoid context bloat
-    if (topLevel.length === 0) return "";
-
-    const lines = topLevel.map(
-      ([name, body]) =>
-        `### /${name}\n${body.slice(0, 300)}${body.length > 300 ? "..." : ""}`
-    );
-    return `
-## AVAILABLE SLASH COMMANDS
-
-You can execute any of these commands when the user references them:
-
-${lines.join("\n\n")}
-`;
-  }
+  if (relevant.length === 0) return "";
 
   const lines = relevant.map(
-    ([name, body]) =>
-      `### /${name}\n${body.slice(0, 300)}${body.length > 300 ? "..." : ""}`
+    (name) => {
+      const body = commands[name];
+      return `### /${name}\n${body.slice(0, 300)}${body.length > 300 ? "..." : ""}`;
+    }
   );
   return `
 ## AVAILABLE SLASH COMMANDS
@@ -514,8 +524,19 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
 
     try {
       const subagentFiles = await readdir(subagentsDir);
+      const allowlist = new Set<string>();
+      if (Array.isArray(manifest.callable_agents) && manifest.callable_agents.length > 0) {
+        for (const c of manifest.callable_agents) {
+          if (c && typeof c.manifest === "string") {
+            allowlist.add(c.manifest.split("/").pop() || c.manifest);
+          }
+        }
+      }
       for (const file of subagentFiles) {
         if (!file.endsWith(".yaml")) continue;
+        if (allowlist.size > 0 && !allowlist.has(file)) {
+          continue;
+        }
 
         let subYAML: SubagentYAML;
         try {
@@ -633,5 +654,14 @@ export async function loadCMACookbooks(): Promise<LoadedCMA> {
   // Register subagent IDs for dynamic dispatch
   setSubagentIds(allSubagentIds);
 
-  return { parents, subagents, steering, subagentIds: allSubagentIds };
+  // Register subagent output_schemas for runtime validation
+  setSubagentSchemas(
+    Object.entries(subagents).map(([key, entry]) => ({
+      key,
+      schema: entry.yaml.output_schema,
+    }))
+  );
+
+  cachedCMA = { parents, subagents, steering, subagentIds: allSubagentIds };
+  return cachedCMA;
 }

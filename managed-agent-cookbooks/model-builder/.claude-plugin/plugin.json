@@ -1,0 +1,6 @@
+{
+  "name": "model-builder",
+  "version": "0.1.0",
+  "description": "Builds DCF, LBO, three-statement, and trading-comps models live in Excel from a ticker and assumption set. Use when you need a clean model from scratch — not for updating an existing coverage model (use earnings-reviewer for that).",
+  "author": { "name": "open-financial-agents" }
+}

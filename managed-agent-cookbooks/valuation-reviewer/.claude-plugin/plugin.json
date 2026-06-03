@@ -1,0 +1,6 @@
+{
+  "name": "valuation-reviewer",
+  "version": "0.1.0",
+  "description": "Ingests GP valuation packages for a fund, runs them through the valuation template, and stages LP reporting. Use for quarter-end portfolio valuation review — not for deal-time underwriting (use model-builder for that).",
+  "author": { "name": "open-financial-agents" }
+}

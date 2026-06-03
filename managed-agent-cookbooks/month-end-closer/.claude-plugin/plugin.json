@@ -1,0 +1,6 @@
+{
+  "name": "month-end-closer",
+  "version": "0.1.0",
+  "description": "Runs the month-end close for an entity — accruals, roll-forwards, and variance commentary — and stages the close package for controller sign-off. Use for period-end close; not for daily reconciliation (use gl-reconciler for that).",
+  "author": { "name": "open-financial-agents" }
+}

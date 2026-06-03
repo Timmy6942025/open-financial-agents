@@ -18,7 +18,7 @@
 import { createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
-import { dispatchSubagent } from "../lib/dispatch.js";
+import { dispatchSubagentValidated } from "../lib/dispatch.js";
 import { defineStep } from "../lib/step-utils.js";
 
 export const modelBuilderWorkflow = createWorkflow({
@@ -59,7 +59,7 @@ export const modelBuilderWorkflow = createWorkflow({
           const entries = fanOutCoverageList(input.ticker, coverageList);
           const results = await Promise.all(
             entries.map(async (e) => {
-              const res = await dispatchSubagent(
+              const res = await dispatchSubagentValidated(
                 mastra,
                 "model-builder/model-data-puller",
                 `Pull historicals and consensus from CapIQ/Daloopa for ${e.ticker}. Return a structured input table as schema-validated JSON. Model: ${input.modelType}${input.assumptions ? `. Assumptions: ${input.assumptions}` : ""}`
@@ -70,7 +70,7 @@ export const modelBuilderWorkflow = createWorkflow({
           return { inputTable: results.join("\n\n---\n\n") };
         }
 
-        const result = await dispatchSubagent(
+        const result = await dispatchSubagentValidated(
           mastra,
           "model-builder/model-data-puller",
           `Pull historicals and consensus from CapIQ/Daloopa for ${input.ticker}. Return a structured input table as schema-validated JSON. Model: ${input.modelType}${input.assumptions ? `. Assumptions: ${input.assumptions}` : ""}`
@@ -96,7 +96,7 @@ export const modelBuilderWorkflow = createWorkflow({
       }),
       passthroughMapper: (input) => ({ modelOutput: input.inputTable, handoff: input.handoff }),
       execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagent(
+        const result = await dispatchSubagentValidated(
           mastra,
           "model-builder/model-builder-builder",
           `Build the requested model into ./out/model.xlsx using xlsx-author conventions. Inputs are the validated table from data-puller plus user assumptions. ${input.inputTable}`
@@ -122,7 +122,7 @@ export const modelBuilderWorkflow = createWorkflow({
         handoff: z.unknown().optional(),
       }),
       execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagent(
+        const result = await dispatchSubagentValidated(
           mastra,
           "model-builder/model-auditor",
           `Re-check ./out/model.xlsx for ties, balance checks, and hardcodes per check-model conventions. Return a pass/fail report with locations of any issues. ${input.modelOutput}`

@@ -1,0 +1,6 @@
+{
+  "name": "statement-auditor",
+  "version": "0.1.0",
+  "description": "Audits a batch of pre-generated LP capital-account statements against the fund NAV pack before distribution — ties out balances, allocations, and fees, and flags discrepancies. Use as the final check before statements go out.",
+  "author": { "name": "open-financial-agents" }
+}

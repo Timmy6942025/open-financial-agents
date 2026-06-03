@@ -1,0 +1,6 @@
+{
+  "name": "kyc-screener",
+  "version": "0.1.0",
+  "description": "Parses an onboarding document packet, runs the firm's KYC/AML rules engine, screens against sanctions and PEP lists, and flags gaps for escalation. Use for new-client onboarding or periodic refresh — not for transaction monitoring.",
+  "author": { "name": "open-financial-agents" }
+}

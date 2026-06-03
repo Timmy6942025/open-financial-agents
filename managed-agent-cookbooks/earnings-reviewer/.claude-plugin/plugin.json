@@ -1,0 +1,6 @@
+{
+  "name": "earnings-reviewer",
+  "version": "0.1.0",
+  "description": "Processes an earnings event end to end — reads the call transcript and filings, updates the coverage model, and drafts the post-earnings note. Use when a covered name reports; for a single name interactively, or fanned out across a coverage list as a managed agent.",
+  "author": { "name": "open-financial-agents" }
+}

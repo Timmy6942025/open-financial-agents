@@ -7,11 +7,18 @@
  *
  * In Mastra, the agent tool receives subagent IDs and delegates generation
  * to mastra.getAgent(), returning the subagent's text output.
+ *
+ * When the subagent has an `output_schema` declared in its YAML, the
+ * returned text is validated against that schema. Validation failures
+ * are surfaced via the `error` field rather than thrown.
  */
 
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import type { Mastra } from "@mastra/core/mastra";
+import { validateSubagentOutput } from "../lib/output-schema-validator.js";
+import type { OutputSchema } from "../lib/cma-loader.js";
+import { parseHandoffRequest, type HandoffRequest } from "../lib/dispatch.js";
 
 /** Keep a reference to the Mastra instance for agent lookup */
 let mastraInstance: Mastra | null = null;
@@ -25,6 +32,18 @@ let subagentIds: string[] = [];
 
 export function setSubagentIds(ids: string[]): void {
   subagentIds = ids;
+}
+
+/** Subagent output_schema lookup, keyed by "cookbook/subagent" */
+const subagentSchemas = new Map<string, OutputSchema>();
+
+/** Register subagent output_schemas for runtime validation */
+export function setSubagentSchemas(
+  entries: Array<{ key: string; schema?: OutputSchema }>
+): void {
+  for (const { key, schema } of entries) {
+    if (schema) subagentSchemas.set(key, schema);
+  }
 }
 
 /**
@@ -44,11 +63,29 @@ export const agentTool = createTool({
   inputSchema: z.object({
     subagent: z.string().describe("The ID of the subagent to dispatch to"),
     prompt: z.string().describe("The task description to send to the subagent"),
+    cookbook: z
+      .string()
+      .optional()
+      .describe(
+        "Optional cookbook name to disambiguate when multiple cookbooks " +
+          "expose a subagent with the same bare name"
+      ),
   }),
   outputSchema: z.object({
     result: z.string().describe("The subagent's response text"),
     subagent: z.string().describe("The subagent that was called"),
     error: z.string().optional().describe("Error message if the dispatch failed"),
+    handoff: z
+      .object({
+        type: z.literal("handoff_request"),
+        target_agent: z.string(),
+        payload: z.object({
+          event: z.string(),
+          context_ref: z.string().optional(),
+        }),
+      })
+      .optional()
+      .describe("Parsed handoff request if the subagent emitted one"),
   }),
   execute: async (inputData) => {
     if (!mastraInstance) {
@@ -59,12 +96,15 @@ export const agentTool = createTool({
       };
     }
 
-    // Validate the subagent exists — strip cookbook/ prefix if scoped ID passed
     const bareId = inputData.subagent.includes("/")
       ? inputData.subagent.split("/").pop()!
       : inputData.subagent;
 
-    if (!subagentIds.includes(bareId)) {
+    const idValid = inputData.subagent.includes("/")
+      ? subagentIds.includes(inputData.subagent)
+      : subagentIds.some((id) => id.endsWith(`/${bareId}`) || id === bareId);
+
+    if (!idValid) {
       return {
         result: "",
         subagent: inputData.subagent,
@@ -73,17 +113,21 @@ export const agentTool = createTool({
     }
 
     try {
-      // Subagent IDs are stored as bare names (e.g., "pitch-researcher")
-      // but registered with scoped keys (e.g., "pitch-agent/pitch-researcher").
-      // Try bare name first, then fall back to scoped lookup.
       let agent = mastraInstance.getAgent(inputData.subagent);
 
-      if (!agent) {
-        // Try to find by matching the end of scoped keys
-        const allAgentIds = Object.keys((mastraInstance as any).agents || {});
-        const scopedId = allAgentIds.find(
-          (id) => id.endsWith(`/${inputData.subagent}`) || id === inputData.subagent
-        );
+      if (!agent && !inputData.subagent.includes("/")) {
+        let scopedId: string | undefined;
+        if (inputData.cookbook) {
+          const candidate = `${inputData.cookbook}/${bareId}`;
+          if (subagentIds.includes(candidate)) {
+            scopedId = candidate;
+          }
+        }
+        if (!scopedId) {
+          scopedId = subagentIds.find(
+            (id) => id.endsWith(`/${bareId}`) || id === bareId
+          );
+        }
         if (scopedId) {
           agent = mastraInstance.getAgent(scopedId);
         }
@@ -98,9 +142,23 @@ export const agentTool = createTool({
       }
 
       const result = await agent.generate(inputData.prompt);
+      const resolvedKey = resolveSchemaKey(inputData.subagent, bareId, inputData.cookbook);
+      const schema = resolvedKey ? subagentSchemas.get(resolvedKey) : undefined;
+      if (schema) {
+        const validation = await validateSubagentOutput(result.text, schema);
+        if (!validation.valid) {
+          return {
+            result: result.text,
+            subagent: inputData.subagent,
+            error: `Output schema validation failed: ${validation.error}`,
+          };
+        }
+      }
+      const handoff = parseHandoffRequest(result.text) ?? undefined;
       return {
         result: result.text,
         subagent: inputData.subagent,
+        ...(handoff ? { handoff } : {}),
       };
     } catch (err: any) {
       return {
@@ -111,3 +169,20 @@ export const agentTool = createTool({
     }
   },
 });
+
+function resolveSchemaKey(
+  requestedId: string,
+  bareId: string,
+  cookbook?: string
+): string | undefined {
+  if (requestedId.includes("/")) {
+    return subagentSchemas.has(requestedId) ? requestedId : undefined;
+  }
+  if (cookbook && subagentSchemas.has(`${cookbook}/${bareId}`)) {
+    return `${cookbook}/${bareId}`;
+  }
+  for (const key of subagentSchemas.keys()) {
+    if (key.endsWith(`/${bareId}`)) return key;
+  }
+  return undefined;
+}

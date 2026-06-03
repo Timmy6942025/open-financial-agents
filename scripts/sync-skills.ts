@@ -38,7 +38,7 @@ for (const vertical of readdirSync(SKILLS_DIR)) {
       srcByName.set(entry, vDir); // key: "xlsx-author", value: "src/skills/financial-analysis"
     } else if (entry.endsWith(".md")) {
       // It's a skill markdown file — use the file directly
-      const name = entry.replace(/\\.md$/, "");
+      const name = entry.replace(/\.md$/, "");
       srcByName.set(name, vDir);
     }
   }

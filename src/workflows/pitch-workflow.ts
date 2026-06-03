@@ -18,7 +18,7 @@
 import { createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { extractHandoff, detectCoverageList, fanOutCoverageList } from "../../scripts/orchestrate.js";
-import { dispatchSubagent } from "../lib/dispatch.js";
+import { dispatchSubagentValidated } from "../lib/dispatch.js";
 import { defineStep } from "../lib/step-utils.js";
 
 export const pitchWorkflow = createWorkflow({
@@ -57,7 +57,7 @@ export const pitchWorkflow = createWorkflow({
           const entries = fanOutCoverageList(input.target, coverageList);
           const results = await Promise.all(
             entries.map(async (e) => {
-              const res = await dispatchSubagent(
+              const res = await dispatchSubagentValidated(
                 mastra,
                 "pitch-agent/pitch-researcher",
                 `Research comps for target: ${e.ticker}. ${input.acquirer ? `Acquirer: ${input.acquirer}. ` : ""}Situation: ${input.situation}${input.thesis ? `. Thesis: ${input.thesis}` : ""}`
@@ -68,7 +68,7 @@ export const pitchWorkflow = createWorkflow({
           return { researchFindings: results.join("\n\n---\n\n") };
         }
 
-        const result = await dispatchSubagent(
+        const result = await dispatchSubagentValidated(
           mastra,
           "pitch-agent/pitch-researcher",
           `Research comps and precedent transactions for target: ${input.target}. Pull trading multiples and precedent data from CapIQ/Daloopa. Return a structured table as schema-validated JSON. ${input.acquirer ? `Acquirer: ${input.acquirer}. ` : ""}Situation: ${input.situation}${input.thesis ? `. Thesis: ${input.thesis}` : ""}`
@@ -98,7 +98,7 @@ export const pitchWorkflow = createWorkflow({
       }),
       passthroughMapper: (input) => ({ workbook: input.researchFindings, handoff: input.handoff }),
       execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagent(
+        const result = await dispatchSubagentValidated(
           mastra,
           "pitch-agent/pitch-modeler",
           `Build DCF/LBO valuation in a scratch directory using the comps and inputs handed to you. Run calculations in Python via Bash. Return computed outputs as structured JSON. You do not write the final workbook — the deck-writer does. ${input.researchFindings}`
@@ -123,7 +123,7 @@ export const pitchWorkflow = createWorkflow({
         handoff: z.unknown().optional(),
       }),
       execute: async ({ input, mastra }) => {
-        const result = await dispatchSubagent(
+        const result = await dispatchSubagentValidated(
           mastra,
           "pitch-agent/pitch-deck-writer",
           `Take the verified comps, model outputs, and football field, and produce ./out/model-pitch.xlsx and ./out/pitch-deck.pptx using xlsx-author and pptx-author conventions. Never open external documents. ${input.workbook}`
