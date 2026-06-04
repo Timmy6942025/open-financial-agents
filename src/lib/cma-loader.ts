@@ -561,10 +561,47 @@ function extractSkillReferences(text: string): string[] {
   return Array.from(refs);
 }
 
-// ── Model resolution ────────────────────────────────────────────────
+// ── Model resolution with fallback ──────────────────────────────────
+
+/**
+ * Fallback chains for agent models. If the primary model fails
+ * (rate limit, timeout), Mastra automatically tries the next entry.
+ * Each entry goes through resolveModelString for gateway routing.
+ *
+ * Only agents explicitly listed here get fallback chains.
+ * Agents without an entry use a single model (no retry array).
+ */
+const FALLBACK_CHAINS: Record<string, Array<{ model: string; maxRetries: number }>> = {
+  "pitch-agent": [
+    { model: "anthropic/claude-opus-4-7", maxRetries: 2 },
+    { model: "openai/gpt-5", maxRetries: 1 },
+  ],
+  "earnings-reviewer": [
+    { model: "anthropic/claude-sonnet-4-6", maxRetries: 2 },
+    { model: "openai/gpt-5-mini", maxRetries: 1 },
+  ],
+  "meeting-prep-agent": [
+    { model: "anthropic/claude-sonnet-4-6", maxRetries: 2 },
+    { model: "openai/gpt-5-mini", maxRetries: 1 },
+  ],
+};
 
 function resolveModel(modelName: string, agentId?: string): DynamicArgument<MastraModelConfig> {
-  return resolveModelForAgent(modelName, agentId);
+  const resolved = resolveModelForAgent(modelName, agentId);
+
+  // Check for fallback chain (only for explicitly listed agents)
+  const chain = agentId ? FALLBACK_CHAINS[agentId] : null;
+
+  if (chain) {
+    // Return ModelWithRetries[] — Mastra handles automatic fallback
+    // Each entry goes through resolveModelString for env var + alias resolution
+    return chain.map((entry) => ({
+      model: resolveModelString(entry.model, agentId),
+      maxRetries: entry.maxRetries,
+    })) as any;
+  }
+
+  return resolved;
 }
 
 // ── Main loader ─────────────────────────────────────────────────────

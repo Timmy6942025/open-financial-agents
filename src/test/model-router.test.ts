@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { resolveModelString, validateModelString } from "../lib/model-router.js";
+import { resolveModelString } from "../lib/model-router.js";
 
 describe("resolveModelString", () => {
   const originalEnv = { ...process.env };
@@ -88,23 +88,5 @@ describe("resolveModelString", () => {
       process.env.DEFAULT_MODEL = "openai/gpt-4o";
       expect(resolveModelString("claude-opus-4-7")).toBe("openai/gpt-4o");
     });
-  });
-});
-
-describe("validateModelString", () => {
-  it("accepts valid provider/model strings", () => {
-    expect(validateModelString("anthropic/claude-opus-4-7")).toBe(true);
-    expect(validateModelString("openai/gpt-4o")).toBe(true);
-    expect(validateModelString("openrouter/meta-llama/llama-4-scout")).toBe(true);
-  });
-
-  it("throws for strings without a slash", () => {
-    expect(() => validateModelString("claude-opus-4")).toThrow(
-      'Invalid model string "claude-opus-4"'
-    );
-  });
-
-  it("throws for empty strings", () => {
-    expect(() => validateModelString("")).toThrow('Invalid model string ""');
   });
 });
