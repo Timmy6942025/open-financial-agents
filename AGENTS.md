@@ -17,7 +17,6 @@ Model-agnostic financial services agent platform built on [Mastra](https://mastr
 │   │   ├── cma-loader.ts         # Single-pass CMA cookbook loader (agent.md + YAML → Mastra Agent)
 │   │   ├── cma-skill-loader.ts   # SKILL.md resolution from src/agent-skills/ and src/skills/
 │   │   ├── command-loader.ts     # Slash command loader
-│   │   ├── dispatch.ts           # Subagent dispatch helper (scoped/bare name resolution + timeout)
 │   │   ├── model-router.ts       # Model string validation, CMA alias mapping, AI Gateway provider
 │   │   └── skill-loader.ts       # Legacy skill loader
 │   ├── mcp/                      # MCP client + 19-server config
@@ -37,7 +36,7 @@ Model-agnostic financial services agent platform built on [Mastra](https://mastr
 │       └── README.md
 ├── partner-plugins/              # LSEG + S&P Global partner plugins
 ├── claude-for-msft-365-install/  # Admin tooling for Microsoft 365 add-in
-└── scripts/                      # check, deploy, sync, validate, orchestrate, version-bump
+└── scripts/                      # check, deploy-agent, sync-skills, validate, orchestrate, smoke, version_bump.py
 ```
 
 ## Development
@@ -56,7 +55,7 @@ npm run cli -- run <slug> "prompt"  # run an agent via CLI
 
 1. Edit skills in `src/skills/<vertical>/`, then run `npm run sync-skills` to propagate to agent bundles.
 2. Run `npx tsx scripts/check.ts` before committing — it lints manifests, verifies references resolve, and catches drift.
-3. `scripts/version_bump.py` auto-patch-bumps plugins via pre-commit hook (`.githooks/pre-commit`).
+3. `scripts/version_bump.py` auto-patch-bumps plugin versions.
 
 ## Architecture
 

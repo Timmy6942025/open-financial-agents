@@ -145,6 +145,7 @@ export function extractHandoff(text: string): HandoffRequest | null {
 
 /**
  * Route a handoff to the target agent via the agent registry.
+ * Includes a 60s timeout to prevent indefinite hangs.
  */
 export async function routeHandoff(
   text: string,
@@ -156,7 +157,11 @@ export async function routeHandoff(
   const targetAgent = agentRegistry[handoff.target_agent];
   if (!targetAgent) return null;
 
-  const result = await targetAgent.generate(handoff.payload.event);
+  const result = await withTimeout(
+    targetAgent.generate(handoff.payload.event),
+    60000,
+    `Handoff to "${handoff.target_agent}"`
+  );
   return {
     targetSlug: handoff.target_agent,
     result: result.text,

@@ -185,13 +185,14 @@ export const grepTool = createTool({
         });
 
       return { matches, count: matches.length };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const e = err as { code?: number; stderr?: string; message?: string };
       // rg exits with code 1 when no matches found
-      if (err.code === 1) {
+      if (e.code === 1) {
         return { matches: [], count: 0 };
       }
       // rg exits with code 2 on error
-      throw new Error(`grep failed: ${err.stderr || err.message}`);
+      throw new Error(`grep failed: ${e.stderr || e.message}`);
     }
   },
 });
@@ -261,11 +262,12 @@ export const bashTool = createTool({
         encoding: "utf-8",
       });
       return { stdout, stderr: "", exitCode: 0 };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string; code?: number; message?: string };
       return {
-        stdout: err.stdout || "",
-        stderr: err.stderr || err.message || "Command failed",
-        exitCode: err.code || 1,
+        stdout: e.stdout || "",
+        stderr: e.stderr || e.message || "Command failed",
+        exitCode: e.code || 1,
       };
     }
   },

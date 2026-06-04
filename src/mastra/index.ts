@@ -95,8 +95,14 @@ memoryInstances["pitch-agent"] = new Memory({
   },
 });
 
-// Earnings-reviewer: lastMessages only (semantic recall requires vector store)
-memoryInstances["earnings-reviewer"] = sharedMemory;
+// Earnings-reviewer: isolated memory (observational memory for quarterly context)
+memoryInstances["earnings-reviewer"] = new Memory({
+  storage,
+  options: {
+    lastMessages: 20,
+    observationalMemory: true,
+  },
+});
 
 // ── Load CMA cookbooks (single-pass: parents + subagents + skills + commands) ─
 const cma: LoadedCMA = await loadCMACookbooks(memoryInstances);

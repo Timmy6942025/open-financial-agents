@@ -40,7 +40,7 @@ src/                           # All source code
 managed-agent-cookbooks/       # CMA cookbooks — one dir per agent
 partner-plugins/               # Partner-authored plugins (LSEG, S&P Global)
 claude-for-msft-365-install/   # Admin tooling for Microsoft 365 add-in
-scripts/                       # check · deploy · sync · validate · orchestrate · version-bump
+scripts/                       # check · deploy-agent · sync-skills · validate · orchestrate · smoke · version_bump.py
 ```
 
 ## Getting Started
@@ -96,7 +96,7 @@ npm run dev            # start Mastra dev server on :4111
 ```bash
 npx tsc --noEmit       # TypeScript type-check (must pass before commit)
 npx tsx scripts/check.ts  # Lint manifests + verify cross-file refs
-npm test               # Run vitest tests (55 tests)
+npm test               # Run vitest tests (62 tests)
 ```
 
 ## How It Fits Together

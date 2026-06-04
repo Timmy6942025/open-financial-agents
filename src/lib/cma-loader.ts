@@ -8,7 +8,7 @@
  *  - MCP server routing (only the servers declared per subagent)
  *  - Guardrail processors (prompt injection, PII detection, moderation)
  *  - Steering examples (few-shot examples in parent system prompt)
- *  - Skill loading (128 SKILL.md files resolved and injected)
+ *  - Skill loading (51 SKILL.md files resolved and injected)
  *  - Slash commands (46 command references in parent context)
  *  - Dynamic subagent dispatch (cma_agent tool for runtime delegation)
  *  - Model selection (claude-opus-4-7 → anthropic/claude-opus-4-7)
@@ -133,9 +133,10 @@ function buildParallelGuardrailWorkflow(agentName: string) {
   })
     .parallel(branches)
     .map(async ({ inputData }) => {
-      // Select the injection detector output if available, otherwise PII
-      const injectionKey = Object.keys(inputData).find((k) => k.includes("injection"));
-      return inputData[injectionKey ?? Object.keys(inputData)[0]];
+      // Select injection detector output if available, otherwise PII
+      return inputData["processor:prompt-injection-detector"]
+        ?? inputData["processor:pii-detector"]
+        ?? inputData[Object.keys(inputData)[0]];
     })
     .commit();
 
@@ -585,16 +586,15 @@ export async function loadCMACookbooks(
   const steering: Record<string, SteeringExample[]> = {};
   const allSubagentIds: string[] = [];
 
-  // ── Load shared resources once ──────────────────────────────────
-  let allMCPTools: Record<string, Tool<any, any, any, any>> = {};
-  try {
-    allMCPTools = await listMCPTools();
-  } catch {
-    console.warn("  ⚠ MCP tools not available — continuing without MCP");
-  }
-
-  const allSkills = await loadAllCMASkills();
-  const allCommands = await loadCommands();
+  // ── Load shared resources once (independent, run in parallel) ────
+  const [allMCPTools, allSkills, allCommands] = await Promise.all([
+    listMCPTools().catch((err: unknown) => {
+      console.warn("  ⚠ MCP tools not available — continuing without MCP", err instanceof Error ? err.message : "");
+      return {} as Record<string, Tool<any, any, any, any>>;
+    }),
+    loadAllCMASkills(),
+    loadCommands(),
+  ]);
   console.log(
     `  ✓ Loaded ${Object.keys(allCommands).length} slash commands`
   );
