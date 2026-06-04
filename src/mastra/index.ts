@@ -12,6 +12,7 @@
 import { Mastra } from "@mastra/core/mastra";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
+import { chatRoute } from "@mastra/ai-sdk";
 import { loadCMACookbooks, type LoadedCMA } from "../lib/cma-loader.js";
 import { connect as connectMCP } from "../mcp/mcp-client.js";
 import { allCMATools } from "../tools/cma-tools.js";
@@ -35,17 +36,6 @@ await connectMCP();
 const storage = new LibSQLStore({
   id: "mastra-storage",
   url: process.env.MASTRA_DB_URL || ":memory:",
-});
-
-// ── Shared memory instance ────────────────────────────────────────
-// All agents that need conversation context share this Memory instance.
-// Per-agent isolation is handled by Mastra via resourceId/threadId.
-const sharedMemory = new Memory({
-  storage,
-  options: {
-    lastMessages: 20,
-    observationalMemory: true,
-  },
 });
 
 // ── Per-agent memory overrides (working memory, semantic recall) ──
@@ -147,6 +137,19 @@ export const mastra = new Mastra({
     valuationReviewerWorkflow,
     monthEndCloserWorkflow,
     statementAuditorWorkflow,
+  },
+  server: {
+    cors: {
+      origin: process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
+      credentials: true,
+    },
+    apiRoutes: [
+      chatRoute({
+        path: "/chat/:agentId",
+        version: "v6",
+        sendReasoning: true,
+      }),
+    ],
   },
 });
 
