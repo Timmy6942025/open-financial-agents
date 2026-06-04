@@ -37,7 +37,7 @@ import yaml from "js-yaml";
 import { resolveModelForAgent, resolveModelString } from "./model-router.js";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import type { DynamicArgument } from "@mastra/core/types";
-import { listTools as listMCPTools } from "../mcp/mcp-client.js";
+import { listToolsets as listMCPToolsets } from "../mcp/mcp-client.js";
 import { CMA_TOOLS } from "../tools/cma-tools.js";
 import {
   loadAllCMASkills,
@@ -382,22 +382,25 @@ function mergeTools(
   return { ...a, ...b };
 }
 
-function filterMCPTools(
-  allTools: Record<string, Tool<any, any, any, any>>,
+/**
+ * Select MCP tools for a set of allowed servers from per-server toolsets.
+ * Uses Mastra's native listToolsets() which returns Record<serverName, Record<toolName, Tool>>.
+ * Replaces the old prefix-matching filterMCPTools().
+ */
+function selectMCPTools(
+  allToolsets: Record<string, Record<string, Tool<any, any, any, any>>>,
   allowedServers: Set<string>
 ): Record<string, Tool<any, any, any, any>> {
   if (allowedServers.size === 0) return {};
-  const sortedServers = Array.from(allowedServers).sort((a, b) => b.length - a.length);
-  const filtered: Record<string, Tool<any, any, any, any>> = {};
-  for (const [toolName, tool] of Object.entries(allTools)) {
-    for (const server of sortedServers) {
-      if (toolName.startsWith(server + "_")) {
-        filtered[toolName] = tool;
-        break;
-      }
+  const selected: Record<string, Tool<any, any, any, any>> = {};
+  for (const server of allowedServers) {
+    const toolset = allToolsets[server];
+    if (!toolset) continue;
+    for (const [toolName, tool] of Object.entries(toolset)) {
+      selected[toolName] = tool;
     }
   }
-  return filtered;
+  return selected;
 }
 
 // ── Steering examples injection ─────────────────────────────────────
@@ -624,10 +627,10 @@ export async function loadCMACookbooks(
   const allSubagentIds: string[] = [];
 
   // ── Load shared resources once (independent, run in parallel) ────
-  const [allMCPTools, allSkills, allCommands] = await Promise.all([
-    listMCPTools().catch((err: unknown) => {
-      console.warn("  ⚠ MCP tools not available — continuing without MCP", err instanceof Error ? err.message : "");
-      return {} as Record<string, Tool<any, any, any, any>>;
+  const [allMCPToolsets, allSkills, allCommands] = await Promise.all([
+    listMCPToolsets().catch((err: unknown) => {
+      console.warn("  ⚠ MCP toolsets not available — continuing without MCP", err instanceof Error ? err.message : "");
+      return {} as Record<string, Record<string, Tool<any, any, any, any>>>;
     }),
     loadAllCMASkills(),
     loadCommands(),
@@ -699,7 +702,7 @@ export async function loadCMACookbooks(
         parentMCPServers.add(tool.mcp_server_name);
       }
     }
-    const parentMCPTools = filterMCPTools(allMCPTools, parentMCPServers);
+    const parentMCPTools = selectMCPTools(allMCPToolsets, parentMCPServers);
 
     let parentTools = mergeTools(parentCMATools, parentMCPTools);
 
@@ -779,7 +782,7 @@ export async function loadCMACookbooks(
       const allowedMCPServers = getAllowedMCPServers(
         subYAML.tools.filter((t): t is MCPToolset => t.type === "mcp_toolset")
       );
-      const subMCPTools = filterMCPTools(allMCPTools, allowedMCPServers);
+      const subMCPTools = selectMCPTools(allMCPToolsets, allowedMCPServers);
 
       // Resolve skills from subagent YAML
       const subSkills = resolveSubagentSkills(subYAML.skills, allSkills);

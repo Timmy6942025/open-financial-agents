@@ -11,7 +11,7 @@
  */
 
 import { createTool } from "@mastra/core/tools";
-import type { ToolAction } from "@mastra/core/tools";
+import { LocalFilesystem } from "@mastra/core/workspace";
 import { z } from "zod";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { exec } from "node:child_process";
@@ -26,10 +26,30 @@ const execAsync = promisify(exec);
 // ── Project root for resolving relative paths ───────────────────────
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+// ── LocalFilesystem with containment for path resolution ────────────
+//
+// Uses Mastra's native LocalFilesystem with `contained: true` to get
+// symlink-escape protection (realpath-based) and path-traversal attack
+// prevention. Replaces the manual resolvePath() that only used `resolve()`.
+//
+// The agent can access any path within PROJECT_ROOT. Paths outside
+// (including symlinks that escape) throw a PermissionError.
+const workspaceFs = new LocalFilesystem({
+  basePath: PROJECT_ROOT,
+  contained: true,
+});
+
 // ── Helper: resolve a user-provided path relative to project root ───
+//
+// Throws if the resolved path escapes PROJECT_ROOT (path traversal
+// protection) or follows a symlink outside the root.
 function resolvePath(userPath: string): string {
-  if (userPath.startsWith("/")) return userPath;
-  return resolve(PROJECT_ROOT, userPath);
+  // LocalFilesystem.resolveAbsolutePath throws PermissionError on escape
+  const absolute = workspaceFs.resolveAbsolutePath(userPath);
+  if (absolute === undefined) {
+    throw new Error(`Path "${userPath}" resolves outside the project root`);
+  }
+  return absolute;
 }
 
 // ── Helper: ensure the parent directory exists for a file path ──────

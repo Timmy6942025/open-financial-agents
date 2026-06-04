@@ -290,6 +290,27 @@ export async function listTools(): Promise<Record<string, Tool<any, any, any, an
 }
 
 /**
+ * List MCP tools grouped by server name.
+ * Uses Mastra's native listToolsets() — returns Record<serverName, Record<toolName, Tool>>.
+ * This replaces manual filterMCPTools() prefix matching in cma-loader.
+ */
+export async function listToolsets(): Promise<Record<string, Record<string, Tool<any, any, any, any>>>> {
+  if (!mcpClientInstance) {
+    console.warn("  ⚠ MCP client not initialized — no toolsets available");
+    return {};
+  }
+
+  try {
+    return await mcpClientInstance.listToolsets();
+  } catch (err) {
+    console.warn(
+      `  ⚠ Failed to list MCP toolsets: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return {};
+  }
+}
+
+/**
  * Get the underlying MCPClient instance for direct access.
  */
 export function getClient(): MCPClient | null {
