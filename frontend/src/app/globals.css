@@ -14,10 +14,6 @@
   --font-geist-mono: var(--font-geist-mono);
 }
 
-/* assistant-ui message group hover */
-[data-message-role="assistant"]:hover .group-hover\\:opacity-100 {
-  opacity: 1;
-}
 
 @theme inline {
   --font-heading: var(--font-sans);

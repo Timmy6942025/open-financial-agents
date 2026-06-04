@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { MenuIcon } from "lucide-react";
-import { AssistantRuntimeProvider, useAui, Suggestions } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, AuiProvider, useAui } from "@assistant-ui/react";
 import { useChatRuntime, AssistantChatTransport } from "@assistant-ui/react-ai-sdk";
 import { Thread } from "@/components/assistant-ui/thread";
 import { ThreadList } from "@/components/assistant-ui/thread-list";
 import { AgentPicker, type AgentId } from "@/components/assistant-ui/agent-picker";
+import { MenuIcon } from "lucide-react";
 import {
   ReadToolUI,
   WriteToolUI,
@@ -17,7 +17,7 @@ import {
 } from "@/components/assistant-ui/tool-ui-cma";
 import { createLocalHistoryAdapter } from "@/components/assistant-ui/history-adapter";
 
-const MASTRA_URL = process.env.NEXT_PUBLIC_MASTRA_URL ?? "http://localhost:4111/api/chat";
+const MASTRA_URL = process.env.NEXT_PUBLIC_MASTRA_URL ?? "http://localhost:4111/chat";
 
 const historyAdapter = createLocalHistoryAdapter();
 
@@ -74,33 +74,74 @@ const AGENT_SUGGESTIONS: Record<AgentId, Array<{ title: string; label: string; p
   ],
 };
 
+/**
+ * BootstrapProvider creates the AuiProvider context that useChatRuntime needs.
+ * useAui({}) is the factory overload — it does NOT require an existing context.
+ * It creates a new AssistantClient and passes it to AuiProvider, so that
+ * useChatRuntime (which calls useAui() consumer overload internally) can
+ * run in child components.
+ */
+function BootstrapProvider({ children }: { children: React.ReactNode }) {
+  const aui = useAui({});
+  return <AuiProvider value={aui}>{children}</AuiProvider>;
+}
+
+/**
+ * ChatContent renders inside AssistantRuntimeProvider so useChatRuntime
+ * has access to the AuiProvider context it needs.
+ * All assistant-ui primitives (Thread, ThreadList, tool UIs) must be
+ * inside this component.
+ */
+function ChatContent({ api, suggestions, sidebarOpen }: {
+  api: string;
+  suggestions: Array<{ title: string; label: string; prompt: string }>;
+  sidebarOpen: boolean;
+}) {
+  const runtime = useChatRuntime({
+    transport: new AssistantChatTransport({ api }),
+    adapters: { history: historyAdapter },
+    suggestions,
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <div className="flex flex-1 overflow-hidden">
+        {sidebarOpen && (
+          <aside className="w-64 border-r border-gray-200 dark:border-gray-800 p-3 overflow-y-auto">
+            <ThreadList />
+          </aside>
+        )}
+        <main className="flex-1 overflow-hidden">
+          <ReadToolUI />
+          <WriteToolUI />
+          <EditToolUI />
+          <GrepToolUI />
+          <GlobToolUI />
+          <BashToolUI />
+          <Thread />
+        </main>
+      </div>
+    </AssistantRuntimeProvider>
+  );
+}
+
 function AssistantContent() {
   const [selectedAgent, setSelectedAgent] = useState<AgentId>("pitch-agent");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const api = `${MASTRA_URL}/${selectedAgent}`;
 
-  const runtime = useChatRuntime({
-    transport: new AssistantChatTransport({ api }),
-    adapters: { history: historyAdapter },
-  });
-
   const suggestions = useMemo(() => {
-    const agentSuggestions = AGENT_SUGGESTIONS[selectedAgent];
-    return Suggestions(
-      agentSuggestions.map((s) => ({
-        title: s.title,
-        label: s.label,
-        prompt: s.prompt,
-      }))
-    );
+    return AGENT_SUGGESTIONS[selectedAgent].map((s) => ({
+      title: s.title,
+      label: s.label,
+      prompt: s.prompt,
+    }));
   }, [selectedAgent]);
-
-  const aui = useAui({ suggestions });
 
   return (
     <div className="flex h-screen flex-col bg-white dark:bg-gray-950">
-      {/* Header */}
+      {/* Header — no assistant-ui primitives, safe outside provider */}
       <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-4 py-3">
         <div className="flex items-center gap-3">
           <button
@@ -125,33 +166,16 @@ function AssistantContent() {
         </div>
       </header>
 
-      {/* Body */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        {sidebarOpen && (
-          <aside className="w-64 border-r border-gray-200 dark:border-gray-800 p-3 overflow-y-auto">
-            <ThreadList />
-          </aside>
-        )}
-
-        {/* Chat Area */}
-        <main className="flex-1 overflow-hidden">
-          <AssistantRuntimeProvider key={selectedAgent} aui={aui} runtime={runtime}>
-            {/* Tool UIs — registered inside provider, rendered automatically on tool-call parts */}
-            <ReadToolUI />
-            <WriteToolUI />
-            <EditToolUI />
-            <GrepToolUI />
-            <GlobToolUI />
-            <BashToolUI />
-            <Thread />
-          </AssistantRuntimeProvider>
-        </main>
-      </div>
+      {/* Chat area — ChatContent wraps everything with the provider */}
+      <ChatContent key={selectedAgent} api={api} suggestions={suggestions} sidebarOpen={sidebarOpen} />
     </div>
   );
 }
 
 export function Assistant() {
-  return <AssistantContent />;
+  return (
+    <BootstrapProvider>
+      <AssistantContent />
+    </BootstrapProvider>
+  );
 }
